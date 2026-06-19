@@ -990,8 +990,8 @@ function logMessage(level, text) {
   const entry = document.createElement('div');
   entry.className = `log-entry log-${level.toLowerCase()}`;
   
-  const timestamp = new Date().toISOString().substring(11, 19);
-  entry.textContent = `[${timestamp}] [${level}] ${text}`;
+  const timestamp = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+  entry.textContent = `[${timestamp} IST] [${level}] ${text}`;
   
   elements.consoleLogs.appendChild(entry);
   

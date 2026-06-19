@@ -214,10 +214,7 @@ impl OutputWriter {
         Ok(())
     }
 
-    // write_zeros: used for bad-sector zero-fill; delegates to write_all which handles sparse.
-    pub fn write_zeros(&mut self, count: usize) -> std::io::Result<()> {
-        self.write_all(&vec![0u8; count])
-    }
+
 
     pub fn flush(&mut self) -> std::io::Result<()> {
         self.current_writer.flush()

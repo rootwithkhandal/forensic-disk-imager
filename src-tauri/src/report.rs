@@ -23,6 +23,7 @@ pub struct ReportData {
     pub bad_sectors: u64,
     pub pre_hashes: HashMap<HashAlgorithm, String>,
     pub hashes: HashMap<HashAlgorithm, String>,
+    pub post_hashes: Option<HashMap<HashAlgorithm, String>>,
     // Live acquisition fields
     pub vss_snapshot_id: Option<String>,
     pub ram_dump_path: Option<String>,
@@ -77,9 +78,17 @@ pub fn generate_txt_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Result
     }
 
     writeln!(file, "--------------------------------------------------")?;
-    writeln!(file, "VERIFICATION HASHES (POST-ACQUISITION)")?;
+    writeln!(file, "ACQUISITION HASHES (STREAM VERIFICATION)")?;
     for (algo, hash_val) in &data.hashes {
         writeln!(file, "  {}: {}", algo, hash_val)?;
+    }
+
+    if let Some(post) = &data.post_hashes {
+        writeln!(file, "--------------------------------------------------")?;
+        writeln!(file, "CONTAINER HASHES (POST-ACQUISITION FILE HASH)")?;
+        for (algo, hash_val) in post {
+            writeln!(file, "  {}: {}", algo, hash_val)?;
+        }
     }
 
     writeln!(file, "--------------------------------------------------")?;
@@ -190,49 +199,272 @@ pub fn generate_html_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Resul
         };
         
         let match_text = if matched {
-            "MATCHED — Integrity Confirmed"
+            r#"<span class="badge success">MATCHED</span>"#
         } else if pre_hash == "N/A" {
-            "NO PRE-HASH — Verify Manually"
+            r#"<span class="badge neutral">NO PRE-HASH</span>"#
         } else {
-            "<span style=\"color: var(--warn);\">MISMATCH — Integrity Compromised</span>"
+            r#"<span class="badge error">MISMATCH</span>"#
+        };
+
+        let post_file_hash_html = if let Some(post) = &data.post_hashes {
+            let val = post.get(algo).cloned().unwrap_or_else(|| "N/A".to_string());
+            format!(r#"<div class="hash-label">Post-Acquisition (Image File Hash)</div><div class="hash-value">{}</div>"#, val)
+        } else {
+            String::new()
         };
 
         hashes_html.push_str(&format!(r#"
-      <div class="hash-row">
-        <div class="hash-algo">{algo}</div>
-        <div class="hash-content">
-          <div class="hash-label">Pre-Acquisition (Source Device)</div>
-          <div class="hash-value">{pre_hash}</div>
-          <div class="hash-label" style="margin-top:8px;">Post-Acquisition (Image File)</div>
-          <div class="hash-value">{post_hash}</div>
-          <div class="hash-match">{match_text}</div>
-        </div>
-      </div>
-"#, algo=algo, pre_hash=pre_hash, post_hash=post_hash, match_text=match_text));
+            <div class="hash-row">
+                <div class="hash-algo">{algo}</div>
+                <div class="hash-content">
+                    <div class="hash-label">Pre-Acquisition (Source Device)</div>
+                    <div class="hash-value">{pre_hash}</div>
+                    <div class="hash-label">Acquisition (Stream Verification)</div>
+                    <div class="hash-value">{post_hash}</div>
+                    {post_file_hash_html}
+                </div>
+                <div class="hash-match">{match_text}</div>
+            </div>
+"#, algo=algo, pre_hash=pre_hash, post_hash=post_hash, post_file_hash_html=post_file_hash_html, match_text=match_text));
     }
 
     let status_badge = if verified_all {
-        "Completed &amp; Verified"
+        "COMPLETED & VERIFIED"
     } else {
-        "Warning — Mismatch"
+        "WARNING — MISMATCH"
     };
+    
+    let status_class = if verified_all { "success" } else { "error" };
 
-    // ponytail: minimalist HTML report without 600 lines of CSS boilerplate
-    let template = r#"<!DOCTYPE html><html><body>
-<h1>ForgeLens Forensic Report — {{CASE_NUMBER}}</h1>
-<p><b>Status:</b> {{STATUS_BADGE}}</p>
-<p><b>Imaging Mode:</b> {{IMAGING_MODE}} | <b>Format:</b> {{FORMAT}}</p>
-<p><b>Duration:</b> {{DURATION_FULL}}</p>
-<p><b>Bad Sectors:</b> {{BAD_SECTORS}}</p>
-<h3>Hash Verification</h3>
-{{HASHES_HTML}}
-</body></html>"#;
+    let template = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ForgeLens Forensic Report — {{CASE_NUMBER}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --primary: #0284c7;
+            --success: #10b981;
+            --success-bg: #d1fae5;
+            --error: #ef4444;
+            --error-bg: #fee2e2;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding-bottom: 24px;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 32px;
+        }
+        .header-title h1 {
+            margin: 0;
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-main);
+        }
+        .header-meta {
+            font-size: 14px;
+            color: var(--text-muted);
+            text-align: right;
+            line-height: 1.8;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .card h3 {
+            margin-top: 0;
+            font-size: 14px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 20px;
+            font-weight: 700;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        .field {
+            margin-bottom: 16px;
+        }
+        .field:last-child {
+            margin-bottom: 0;
+        }
+        .label {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 700;
+            margin-bottom: 4px;
+            letter-spacing: 0.05em;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .value {
+            font-size: 15px;
+            font-weight: 600;
+            word-break: break-all;
+            color: var(--text-main);
+        }
+        .data-mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .hash-table {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .hash-row {
+            display: grid;
+            grid-template-columns: 120px 1fr 150px;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+        }
+        .hash-row:last-child {
+            border-bottom: none;
+        }
+        .hash-algo {
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--primary);
+        }
+        .hash-content .hash-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            margin-top: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .hash-content .hash-label:first-child {
+            margin-top: 0;
+        }
+        .hash-content .hash-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            color: var(--text-main);
+            font-weight: 500;
+            margin-top: 4px;
+        }
+        .hash-match {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+        }
+        .badge.success {
+            background: var(--success-bg);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .badge.error {
+            background: var(--error-bg);
+            color: var(--error);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        .badge.neutral {
+            background: #f1f5f9;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-title">
+                <h1>Cyber-Forensic Acquisition Report</h1>
+                <div style="margin-top: 8px; font-size: 18px; font-weight: 600; color: var(--primary);">Case: {{CASE_NUMBER}} | Evidence ID: {{EVIDENCE_ID}}</div>
+            </div>
+            <div class="header-meta">
+                <div><strong>Examiner:</strong> {{EXAMINER}}</div>
+                <div><strong>Report Generated:</strong> {{REPORT_DATE}}</div>
+                <div style="margin-top: 8px;"><span class="badge {{STATUS_CLASS}}">{{STATUS_BADGE}}</span></div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Imaging Parameters</h3>
+                <div class="field"><div class="label">IMAGING MODE</div><div class="value">{{IMAGING_MODE}}</div></div>
+                <div class="field"><div class="label">TARGET FORMAT</div><div class="value">{{FORMAT}}</div></div>
+                <div class="field"><div class="label">NOTES</div><div class="value">{{NOTES}}</div></div>
+            </div>
+            
+            <div class="card">
+                <h3>Source Details</h3>
+                <div class="field"><div class="label">DEVICE PATH</div><div class="value data-mono">{{SOURCE_DEVICE}}</div></div>
+                <div class="field"><div class="label">HARDWARE MODEL</div><div class="value">{{SOURCE_MODEL}}</div></div>
+                <div class="field"><div class="label">SERIAL NUMBER</div><div class="value data-mono">{{SOURCE_SERIAL}}</div></div>
+                <div class="field"><div class="label">TOTAL CAPACITY</div><div class="value">{{SOURCE_SIZE_GB}} GB <span style="font-weight:400; color:var(--text-muted); font-size:13px;">({{SOURCE_SIZE_BYTES}} bytes)</span></div></div>
+            </div>
+
+            <div class="card">
+                <h3>Acquisition Details</h3>
+                <div class="field"><div class="label">DESTINATION FILE</div><div class="value data-mono">{{DEST_FILE}}</div></div>
+                <div class="field"><div class="label">START TIME</div><div class="value data-mono">{{START_TIME}}</div></div>
+                <div class="field"><div class="label">END TIME</div><div class="value data-mono">{{END_TIME}}</div></div>
+                <div class="field"><div class="label">TOTAL DURATION</div><div class="value">{{DURATION_FULL}}</div></div>
+                <div class="field"><div class="label">BAD SECTORS</div><div class="value">{{BAD_SECTORS}}</div></div>
+            </div>
+        </div>
+
+        <h3 style="color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; font-weight: 700; font-size: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">Hash Verification</h3>
+        <div class="hash-table">
+            {{HASHES_HTML}}
+        </div>
+    </div>
+</body>
+</html>"#;
 
     let html_content = template
         .replace("{{CASE_NUMBER}}", &data.case_number)
         .replace("{{IMAGING_MODE}}", &data.imaging_mode)
         .replace("{{FORMAT}}", &data.format)
         .replace("{{STATUS_BADGE}}", status_badge)
+        .replace("{{STATUS_CLASS}}", status_class)
         .replace("{{REPORT_DATE}}", &to_ist_rfc2822(&chrono::Utc::now()))
         .replace("{{EXAMINER}}", &data.examiner)
         .replace("{{EVIDENCE_ID}}", &data.evidence_id)
@@ -268,7 +500,12 @@ pub fn generate_csv_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Result
     writeln!(file, "\"{}\",\"Acquisition Started\",\"Source: {}\"", to_ist_rfc2822(&data.start_time), data.source_device)?;
     writeln!(file, "\"{}\",\"Acquisition Finished\",\"Destination: {}\"", to_ist_rfc2822(&data.end_time), data.dest_file)?;
     for (algo, hash_val) in &data.hashes {
-        writeln!(file, "\"{}\",\"Hash Computed\",\"{}: {}\"", to_ist_rfc2822(&data.end_time), algo, hash_val)?;
+        writeln!(file, "\"{}\",\"Acquisition Hash Computed\",\"{}: {}\"", to_ist_rfc2822(&data.end_time), algo, hash_val)?;
+    }
+    if let Some(post) = &data.post_hashes {
+        for (algo, hash_val) in post {
+            writeln!(file, "\"{}\",\"File Hash Computed\",\"{}: {}\"", to_ist_rfc2822(&chrono::Utc::now()), algo, hash_val)?;
+        }
     }
     Ok(())
 }

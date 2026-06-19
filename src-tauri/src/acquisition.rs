@@ -45,14 +45,15 @@ pub struct AcquisitionResult {
 
 pub async fn acquire(
     source: &mut RawDevice,
-    dest: &mut OutputWriter,
+    mut dest: OutputWriter,
     config: &AcquisitionConfig,
     progress_tx: Sender<ProgressEvent>,
     checkpoint_path: &std::path::Path,
     start_offset: u64,
 ) -> Result<AcquisitionResult> {
     let hash_algorithms = config.hash_algorithms.clone();
-    let (hash_tx, mut hash_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(4);
+    let (hash_tx, mut hash_rx) = tokio::sync::mpsc::channel::<std::sync::Arc<Vec<u8>>>(4);
+    let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<std::sync::Arc<Vec<u8>>>(4);
     
     let hashing_task = tokio::task::spawn_blocking(move || {
         let mut hashers = MultiHasher::new(&hash_algorithms);
@@ -60,6 +61,44 @@ pub async fn acquire(
             hashers.update(&chunk);
         }
         hashers.finalize()
+    });
+
+    let read_verification = config.read_verification;
+    let compression = config.compression;
+    let writer_progress_tx = progress_tx.clone();
+
+    let writing_task = tokio::task::spawn_blocking(move || -> Result<()> {
+        while let Some(chunk) = write_rx.blocking_recv() {
+            dest.write_all(&chunk)?;
+
+            if read_verification {
+                if compression == crate::output::CompressionFormat::None {
+                    dest.flush()?;
+                    let n = chunk.len() as u64;
+                    if dest.bytes_written_part() >= n {
+                        let current_path = dest.current_part_path();
+                        let offset = dest.bytes_written_part() - n;
+                        
+                        let mut file = std::fs::File::open(&current_path)?;
+                        use std::io::{Read, Seek, SeekFrom};
+                        file.seek(SeekFrom::Start(offset))?;
+                        let mut read_buf = vec![0u8; chunk.len()];
+                        file.read_exact(&mut read_buf)?;
+                        
+                        if read_buf != chunk.as_slice() {
+                            let msg = format!("[ERROR] Read verification failed at offset {} of {}", offset, current_path.display());
+                            let _ = writer_progress_tx.blocking_send(ProgressEvent::Log(msg.clone()));
+                            return Err(crate::error::ForgelensError::Io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "Written data mismatch on verification read-back",
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        dest.flush()?;
+        Ok(())
     });
     let mut bytes_read: u64 = start_offset;
     let mut bad_sectors: u64 = 0;
@@ -115,11 +154,13 @@ pub async fn acquire(
                 bad_sectors += 1;
                 // ponytail: always zero-fill bad sectors; Skip/Retry removed as unused.
                 let _ = source.seek_forward(current_block_size as u64);
-                let zeros = vec![0u8; current_block_size];
-                if let Err(_) = hash_tx.send(zeros).await {
+                let zeros = std::sync::Arc::new(vec![0u8; current_block_size]);
+                if let Err(_) = hash_tx.send(zeros.clone()).await {
                     return Err(crate::error::ForgelensError::Backend("Hashing task died unexpectedly".to_string()));
                 }
-                dest.write_zeros(current_block_size)?;
+                if let Err(_) = write_tx.send(zeros).await {
+                    return Err(crate::error::ForgelensError::Backend("Writing task died unexpectedly".to_string()));
+                }
                 bytes_read += current_block_size as u64;
             }
         }
@@ -145,37 +186,12 @@ pub async fn acquire(
                 }
             }
 
-            let chunk = active_slice[..n].to_vec();
-            if let Err(_) = hash_tx.send(chunk).await {
+            let chunk = std::sync::Arc::new(active_slice[..n].to_vec());
+            if let Err(_) = hash_tx.send(chunk.clone()).await {
                 return Err(crate::error::ForgelensError::Backend("Hashing task died unexpectedly".to_string()));
             }
-
-            dest.write_all(&active_slice[..n])?;
-
-            if config.read_verification {
-                if config.compression == crate::output::CompressionFormat::None {
-                    dest.flush()?;
-                    if dest.bytes_written_part() >= (n as u64) {
-                        let current_path = dest.current_part_path();
-                        let offset = dest.bytes_written_part() - (n as u64);
-                        let expected_bytes = &active_slice[..n];
-                        
-                        let mut file = std::fs::File::open(&current_path)?;
-                        use std::io::{Read, Seek, SeekFrom};
-                        file.seek(SeekFrom::Start(offset))?;
-                        let mut read_buf = vec![0u8; n];
-                        file.read_exact(&mut read_buf)?;
-                        
-                        if read_buf != expected_bytes {
-                            let msg = format!("[ERROR] Read verification failed at offset {} of {}", offset, current_path.display());
-                            let _ = progress_tx.send(ProgressEvent::Log(msg.clone())).await;
-                            return Err(crate::error::ForgelensError::Io(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                "Written data mismatch on verification read-back",
-                            )));
-                        }
-                    }
-                }
+            if let Err(_) = write_tx.send(chunk).await {
+                return Err(crate::error::ForgelensError::Backend("Writing task died unexpectedly".to_string()));
             }
 
             bytes_read += n as u64;
@@ -206,12 +222,16 @@ pub async fn acquire(
         }
     }
 
-    dest.flush()?;
     drop(hash_tx); // close the channel to signal the hashing task to finish
+    drop(write_tx); // close the channel to signal the writing task to finish
 
     let final_hashes = hashing_task.await.map_err(|e| {
         crate::error::ForgelensError::Backend(format!("Hashing task panic: {}", e))
     })?;
+
+    writing_task.await.map_err(|e| {
+        crate::error::ForgelensError::Backend(format!("Writing task panic: {}", e))
+    })??;
 
     let result = AcquisitionResult {
         bytes_read,
@@ -617,4 +637,62 @@ pub async fn acquire_triage(
     }).await;
 
     Ok(())
+}
+
+pub async fn compute_file_hash(
+    file_path: &std::path::Path,
+    hash_algorithms: &[HashAlgorithm],
+    progress_tx: Sender<ProgressEvent>,
+) -> Result<HashMap<HashAlgorithm, String>> {
+    let path_clone = file_path.to_path_buf();
+    let algos = hash_algorithms.to_vec();
+    let tx = progress_tx.clone();
+
+    tokio::task::spawn_blocking(move || -> Result<HashMap<HashAlgorithm, String>> {
+        let mut hashers = MultiHasher::new(&algos);
+        let mut file = std::fs::File::open(&path_clone)?;
+        let metadata = file.metadata()?;
+        let total_size = metadata.len();
+        
+        let mut bytes_hashed: u64 = 0;
+        let mut buffer = vec![0u8; 1024 * 1024 * 4]; // 4MB buffer for fast sequential reads
+        
+        let start_time = Instant::now();
+        let mut last_progress_time = Instant::now();
+        
+        use std::io::Read;
+        
+        loop {
+            if tx.is_closed() {
+                return Err(crate::error::ForgelensError::Cancelled);
+            }
+            
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break; // EOF
+            }
+            
+            hashers.update(&buffer[..n]);
+            bytes_hashed += n as u64;
+            
+            let now = Instant::now();
+            if now.duration_since(last_progress_time).as_millis() >= 250 {
+                let elapsed = now.duration_since(start_time).as_secs_f64();
+                let speed_bps = if elapsed > 0.0 { bytes_hashed as f64 / elapsed } else { 0.0 };
+                
+                let _ = tx.blocking_send(ProgressEvent::Progress {
+                    bytes_read: bytes_hashed,
+                    total_size,
+                    speed_bps,
+                    bad_sectors: 0,
+                });
+                
+                last_progress_time = now;
+            }
+        }
+        
+        Ok(hashers.finalize())
+    })
+    .await
+    .map_err(|e| crate::error::ForgelensError::Backend(e.to_string()))?
 }

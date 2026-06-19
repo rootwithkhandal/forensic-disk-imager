@@ -272,6 +272,7 @@ async fn start_acquisition(
                         bad_sectors: 0,
                         pre_hashes: HashMap::new(),
                         hashes: result.hashes.clone(),
+                        post_hashes: None,
                         vss_snapshot_id: None,
                         ram_dump_path: None,
                         ram_dump_size: None,
@@ -382,7 +383,7 @@ async fn start_acquisition(
 
             match crate::acquisition::acquire(
                 &mut source_dev,
-                &mut dest_writer,
+                dest_writer,
                 &config,
                 tx.clone(),
                 &checkpoint_path,
@@ -391,6 +392,23 @@ async fn start_acquisition(
             .await
             {
                 Ok(result) => {
+                    let mut post_hashes = None;
+                    if config_input.hash_verification.contains("Post") {
+                        log(format!("[ACQUISITION] Computing post-acquisition hash for output container file...")).await;
+                        match crate::acquisition::compute_file_hash(
+                            &dest_file_path,
+                            &config.hash_algorithms,
+                            tx.clone(),
+                        ).await {
+                            Ok(hashes) => {
+                                post_hashes = Some(hashes);
+                            }
+                            Err(e) => {
+                                log(format!("[ERROR] Post-acquisition hash failed: {}", e)).await;
+                            }
+                        }
+                    }
+
                     let end_time_utc = chrono::Utc::now();
                     let report_data = crate::report::ReportData {
                         case_number: config.case_number.clone(),
@@ -409,6 +427,7 @@ async fn start_acquisition(
                         bad_sectors: result.bad_sectors + bad_sectors_start,
                         pre_hashes,
                         hashes: result.hashes.clone(),
+                        post_hashes,
                         vss_snapshot_id: None,
                         ram_dump_path: None,
                         ram_dump_size: None,
@@ -808,6 +827,7 @@ async fn start_live_acquisition(
             bad_sectors: 0,
             pre_hashes: HashMap::new(),
             hashes: HashMap::new(),
+            post_hashes: None,
             vss_snapshot_id,
             ram_dump_path,
             ram_dump_size,
