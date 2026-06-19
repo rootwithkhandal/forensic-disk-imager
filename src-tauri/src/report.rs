@@ -85,7 +85,11 @@ pub fn generate_txt_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Result
 
     if let Some(post) = &data.post_hashes {
         writeln!(file, "--------------------------------------------------")?;
-        writeln!(file, "CONTAINER HASHES (POST-ACQUISITION FILE HASH)")?;
+        if data.imaging_mode == "Logical" {
+            writeln!(file, "FINAL HASHES (DESTINATION FOLDER HASH)")?;
+        } else {
+            writeln!(file, "CONTAINER HASHES (POST-ACQUISITION FILE HASH)")?;
+        }
         for (algo, hash_val) in post {
             writeln!(file, "  {}: {}", algo, hash_val)?;
         }
@@ -95,16 +99,41 @@ pub fn generate_txt_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Result
     
     // Perform Verification matching
     let mut verified = true;
-    if !data.pre_hashes.is_empty() {
+    if !data.pre_hashes.is_empty() || (data.imaging_mode == "Logical" && data.post_hashes.is_some()) {
         writeln!(file, "INTEGRITY VERIFICATION LOG")?;
-        for (algo, post_hash) in &data.hashes {
+        for (algo, stream_hash) in &data.hashes {
+            let mut match_status = true;
+            let mut checks = Vec::new();
+
             if let Some(pre_hash) = data.pre_hashes.get(algo) {
-                if pre_hash == post_hash {
-                    writeln!(file, "  {}: MATCHED (Integrity Confirmed)", algo)?;
+                if pre_hash == stream_hash {
+                    checks.push("Pre-Hash: MATCHED");
                 } else {
-                    writeln!(file, "  {}: MISMATCHED (WARNING: Integrity Compromised!)", algo)?;
-                    verified = false;
+                    checks.push("Pre-Hash: MISMATCH");
+                    match_status = false;
                 }
+            }
+
+            if data.imaging_mode == "Logical" {
+                if let Some(post_hashes) = &data.post_hashes {
+                    if let Some(post_hash) = post_hashes.get(algo) {
+                        if post_hash == stream_hash {
+                            checks.push("Final-Hash: MATCHED");
+                        } else {
+                            checks.push("Final-Hash: MISMATCH");
+                            match_status = false;
+                        }
+                    }
+                }
+            }
+
+            if match_status {
+                let check_str = if checks.is_empty() { "Integrity Confirmed".to_string() } else { checks.join(" | ") };
+                writeln!(file, "  {}: MATCHED ({})", algo, check_str)?;
+            } else {
+                let check_str = if checks.is_empty() { "WARNING: Integrity Compromised!".to_string() } else { checks.join(" | ") };
+                writeln!(file, "  {}: MISMATCHED ({})", algo, check_str)?;
+                verified = false;
             }
         }
         writeln!(file, "--------------------------------------------------")?;
@@ -189,26 +218,50 @@ pub fn generate_html_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Resul
     
     let mut hashes_html = String::new();
     let mut verified_all = true;
-    for (algo, post_hash) in &data.hashes {
+    for (algo, stream_hash) in &data.hashes {
         let pre_hash = data.pre_hashes.get(algo).cloned().unwrap_or_else(|| "N/A".to_string());
-        let matched = if pre_hash == *post_hash {
-            true
-        } else {
-            verified_all = false;
-            false
-        };
         
-        let match_text = if matched {
+        let mut matched = true;
+        let mut checks_performed = 0;
+
+        if pre_hash != "N/A" {
+            checks_performed += 1;
+            if pre_hash != *stream_hash {
+                matched = false;
+            }
+        }
+
+        if data.imaging_mode == "Logical" {
+            if let Some(post_hashes) = &data.post_hashes {
+                if let Some(post_hash) = post_hashes.get(algo) {
+                    checks_performed += 1;
+                    if *post_hash != *stream_hash {
+                        matched = false;
+                    }
+                }
+            }
+        }
+        
+        if !matched {
+            verified_all = false;
+        }
+        
+        let match_text = if matched && checks_performed > 0 {
             r#"<span class="badge success">MATCHED</span>"#
-        } else if pre_hash == "N/A" {
-            r#"<span class="badge neutral">NO PRE-HASH</span>"#
+        } else if checks_performed == 0 {
+            r#"<span class="badge neutral">NO VERIFICATION</span>"#
         } else {
             r#"<span class="badge error">MISMATCH</span>"#
         };
 
         let post_file_hash_html = if let Some(post) = &data.post_hashes {
             let val = post.get(algo).cloned().unwrap_or_else(|| "N/A".to_string());
-            format!(r#"<div class="hash-item-label">Post-Acquisition (Image File Hash)</div><div class="hash-item-value"><span>{}</span><button class="copy-btn" title="Copy">📋</button></div>"#, val)
+            let label = if data.imaging_mode == "Logical" {
+                "Final Hash (Destination Folder)"
+            } else {
+                "Post-Acquisition (Image File Hash)"
+            };
+            format!(r#"<div class="hash-item-label">{}</div><div class="hash-item-value"><span>{}</span><button class="copy-btn" title="Copy">📋</button></div>"#, label, val)
         } else {
             String::new()
         };
@@ -220,12 +273,12 @@ pub fn generate_html_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Resul
                     <div class="hash-item-label">Pre-Acquisition (Source Device)</div>
                     <div class="hash-item-value"><span>{pre_hash}</span><button class="copy-btn" title="Copy">📋</button></div>
                     <div class="hash-item-label">Acquisition (Stream Verification)</div>
-                    <div class="hash-item-value"><span>{post_hash}</span><button class="copy-btn" title="Copy">📋</button></div>
+                    <div class="hash-item-value"><span>{stream_hash}</span><button class="copy-btn" title="Copy">📋</button></div>
                     {post_file_hash_html}
                 </div>
                 <div class="hash-match">{match_text}</div>
             </div>
-"#, algo=algo, pre_hash=pre_hash, post_hash=post_hash, post_file_hash_html=post_file_hash_html, match_text=match_text));
+"#, algo=algo, pre_hash=pre_hash, stream_hash=stream_hash, post_file_hash_html=post_file_hash_html, match_text=match_text));
     }
 
     let status_badge = if verified_all {
