@@ -98,7 +98,7 @@ async fn hash_file(
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 { break; }
-        hashers.update(&buf[..n]);
+        hashers.update(std::sync::Arc::new(buf[..n].to_vec()));
         bytes_hashed += n as u64;
 
         let now = Instant::now();

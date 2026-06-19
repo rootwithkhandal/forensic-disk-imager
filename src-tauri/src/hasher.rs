@@ -48,32 +48,63 @@ impl HasherInner {
     }
 }
 
+use std::sync::Arc;
+use std::sync::mpsc::{self, Sender};
+use std::thread::JoinHandle;
+
 pub struct MultiHasher {
-    hashers: Vec<(HashAlgorithm, HasherInner)>,
+    senders: Vec<Sender<Option<Arc<Vec<u8>>>>>,
+    handles: Vec<JoinHandle<(HashAlgorithm, String)>>,
 }
 
 impl MultiHasher {
     pub fn new(algorithms: &[HashAlgorithm]) -> Self {
-        let hashers = algorithms.iter().map(|&algo| {
-            let inner = match algo {
-                HashAlgorithm::MD5    => HasherInner::MD5(Md5::new()),
-                HashAlgorithm::SHA1   => HasherInner::SHA1(Sha1::new()),
-                HashAlgorithm::SHA256 => HasherInner::SHA256(Sha256::new()),
-                HashAlgorithm::SHA512 => HasherInner::SHA512(Sha512::new()),
-            };
-            (algo, inner)
-        }).collect();
-        Self { hashers }
+        let mut senders = Vec::new();
+        let mut handles = Vec::new();
+
+        for &algo in algorithms {
+            let (tx, rx) = mpsc::channel::<Option<Arc<Vec<u8>>>>();
+            senders.push(tx);
+
+            let handle = std::thread::spawn(move || {
+                let mut inner = match algo {
+                    HashAlgorithm::MD5    => HasherInner::MD5(Md5::new()),
+                    HashAlgorithm::SHA1   => HasherInner::SHA1(Sha1::new()),
+                    HashAlgorithm::SHA256 => HasherInner::SHA256(Sha256::new()),
+                    HashAlgorithm::SHA512 => HasherInner::SHA512(Sha512::new()),
+                };
+
+                while let Ok(Some(chunk)) = rx.recv() {
+                    inner.update(&chunk);
+                }
+
+                (algo, inner.finalize())
+            });
+
+            handles.push(handle);
+        }
+
+        Self { senders, handles }
     }
 
-    pub fn update(&mut self, data: &[u8]) {
-        for (_, h) in &mut self.hashers {
-            h.update(data);
+    pub fn update(&mut self, data: Arc<Vec<u8>>) {
+        for tx in &self.senders {
+            let _ = tx.send(Some(data.clone()));
         }
     }
 
     pub fn finalize(self) -> HashMap<HashAlgorithm, String> {
-        self.hashers.into_iter().map(|(algo, h)| (algo, h.finalize())).collect()
+        for tx in &self.senders {
+            let _ = tx.send(None);
+        }
+
+        let mut results = HashMap::new();
+        for handle in self.handles {
+            if let Ok((algo, hash_val)) = handle.join() {
+                results.insert(algo, hash_val);
+            }
+        }
+        results
     }
 }
 

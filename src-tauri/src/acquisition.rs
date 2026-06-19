@@ -58,9 +58,28 @@ pub async fn acquire(
     let hashing_task = tokio::task::spawn_blocking(move || {
         let mut hashers = MultiHasher::new(&hash_algorithms);
         while let Some(chunk) = hash_rx.blocking_recv() {
-            hashers.update(&chunk);
+            hashers.update(chunk);
         }
         hashers.finalize()
+    });
+
+    let keywords = config.keywords.clone();
+    let (kw_tx, mut kw_rx) = tokio::sync::mpsc::channel::<(u64, std::sync::Arc<Vec<u8>>)>(4);
+    let kw_progress_tx = progress_tx.clone();
+    let kw_task = tokio::task::spawn_blocking(move || {
+        while let Some((offset_base, chunk)) = kw_rx.blocking_recv() {
+            for kw in &keywords {
+                if let Some(pos) = search_bytes(&chunk, kw.as_bytes()) {
+                    let hit_offset = offset_base + pos as u64;
+                    let msg = format!("[KEYWORD MATCH] Found keyword '{}' at offset {}", kw, hit_offset);
+                    let _ = kw_progress_tx.blocking_send(ProgressEvent::Log(msg));
+                    let _ = kw_progress_tx.blocking_send(ProgressEvent::KeywordHit {
+                        keyword: kw.clone(),
+                        offset: hit_offset,
+                    });
+                }
+            }
+        }
     });
 
     let read_verification = config.read_verification;
@@ -170,23 +189,15 @@ pub async fn acquire(
                 break; // EOF
             }
             
-            // Keyword scanning
+            let chunk = std::sync::Arc::new(active_slice[..n].to_vec());
+
+            // Keyword scanning (offloaded)
             if !config.keywords.is_empty() {
-                let block_data = &active_slice[..n];
-                for kw in &config.keywords {
-                    if let Some(pos) = search_bytes(block_data, kw.as_bytes()) {
-                        let hit_offset = bytes_read + pos as u64;
-                        let msg = format!("[KEYWORD MATCH] Found keyword '{}' at offset {}", kw, hit_offset);
-                        let _ = progress_tx.send(ProgressEvent::Log(msg)).await;
-                        let _ = progress_tx.send(ProgressEvent::KeywordHit {
-                            keyword: kw.clone(),
-                            offset: hit_offset,
-                        }).await;
-                    }
+                if let Err(_) = kw_tx.send((bytes_read, chunk.clone())).await {
+                    return Err(crate::error::ForgelensError::Backend("Keyword scanning task died unexpectedly".to_string()));
                 }
             }
 
-            let chunk = std::sync::Arc::new(active_slice[..n].to_vec());
             if let Err(_) = hash_tx.send(chunk.clone()).await {
                 return Err(crate::error::ForgelensError::Backend("Hashing task died unexpectedly".to_string()));
             }
@@ -224,6 +235,7 @@ pub async fn acquire(
 
     drop(hash_tx); // close the channel to signal the hashing task to finish
     drop(write_tx); // close the channel to signal the writing task to finish
+    drop(kw_tx); // close the keyword task channel
 
     let final_hashes = hashing_task.await.map_err(|e| {
         crate::error::ForgelensError::Backend(format!("Hashing task panic: {}", e))
@@ -232,6 +244,8 @@ pub async fn acquire(
     writing_task.await.map_err(|e| {
         crate::error::ForgelensError::Backend(format!("Writing task panic: {}", e))
     })??;
+
+    let _ = kw_task.await;
 
     let result = AcquisitionResult {
         bytes_read,
@@ -280,12 +294,12 @@ pub async fn compute_pre_hash(
         match source_dev.read_block(active_slice) {
             Ok(0) => break,
             Ok(n) => {
-                hashers.update(&active_slice[..n]);
+                hashers.update(std::sync::Arc::new(active_slice[..n].to_vec()));
                 bytes_hashed += n as u64;
             }
             Err(_) => {
                 // If there's a bad sector during pre-hash, we skip it (zero fill)
-                hashers.update(&vec![0u8; current_block]);
+                hashers.update(std::sync::Arc::new(vec![0u8; current_block]));
                 bytes_hashed += current_block as u64;
                 let _ = source_dev.seek_forward(current_block as u64);
             }
@@ -376,7 +390,7 @@ pub async fn acquire_logical(
                     if progress_tx.is_closed() {
                         return Err(crate::error::ForgelensError::Cancelled);
                     }
-                    hashers.update(&buf[..n]);
+                    hashers.update(std::sync::Arc::new(buf[..n].to_vec()));
                     dst_file.write_all(&buf[..n])?;
                     bytes_read += n as u64;
                     
@@ -672,7 +686,7 @@ pub async fn compute_file_hash(
                 break; // EOF
             }
             
-            hashers.update(&buffer[..n]);
+            hashers.update(std::sync::Arc::new(buffer[..n].to_vec()));
             bytes_hashed += n as u64;
             
             let now = Instant::now();

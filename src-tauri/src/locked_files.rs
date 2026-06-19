@@ -131,7 +131,7 @@ fn copy_file_with_hash(
         match src_file.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                hashers.update(&buf[..n]);
+                hashers.update(std::sync::Arc::new(buf[..n].to_vec()));
                 dst_file.write_all(&buf[..n])
                     .map_err(|e| format!("Write error: {}", e))?;
                 total_bytes += n as u64;
