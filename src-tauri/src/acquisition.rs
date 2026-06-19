@@ -364,9 +364,18 @@ pub async fn acquire_logical(
         }
     }
     
+    // Sort files by relative path to ensure deterministic processing order
+    all_files.sort_by(|a, b| {
+        let rel_a = a.strip_prefix(source_dir).unwrap_or(a);
+        let rel_b = b.strip_prefix(source_dir).unwrap_or(b);
+        rel_a.cmp(rel_b)
+    });
+    
     let total_size: u64 = all_files.iter().map(|f| f.metadata().map(|m| m.len()).unwrap_or(0)).sum();
     let start_time = Instant::now();
     let mut last_progress_time = Instant::now();
+    
+    let mut global_hashers = MultiHasher::new(&config.hash_algorithms);
     
     for file_path in all_files {
         if progress_tx.is_closed() {
@@ -390,7 +399,9 @@ pub async fn acquire_logical(
                     if progress_tx.is_closed() {
                         return Err(crate::error::ForgelensError::Cancelled);
                     }
-                    hashers.update(std::sync::Arc::new(buf[..n].to_vec()));
+                    let chunk = std::sync::Arc::new(buf[..n].to_vec());
+                    hashers.update(chunk.clone());
+                    global_hashers.update(chunk);
                     dst_file.write_all(&buf[..n])?;
                     bytes_read += n as u64;
                     
@@ -409,9 +420,36 @@ pub async fn acquire_logical(
                 }
                 
                 let hashes = hashers.finalize();
+
+                dst_file.flush()?;
+                drop(dst_file);
+
+                let mut verification_status = "Skipped".to_string();
+                if config.read_verification {
+                    match compute_file_hash(&target_path, &config.hash_algorithms, progress_tx.clone()).await {
+                        Ok(verify_hashes) => {
+                            if verify_hashes == hashes {
+                                verification_status = "Passed".to_string();
+                            } else {
+                                verification_status = "FAILED (Hash Mismatch)".to_string();
+                                let msg = format!("[ERROR] Hash verification failed for file: {}", relative_path.display());
+                                let _ = progress_tx.send(ProgressEvent::Log(msg)).await;
+                            }
+                        }
+                        Err(e) => {
+                            verification_status = format!("Error ({})", e);
+                            let msg = format!("[ERROR] Hash verification error for file {}: {}", relative_path.display(), e);
+                            let _ = progress_tx.send(ProgressEvent::Log(msg)).await;
+                        }
+                    }
+                }
+
                 writeln!(manifest, "File: {}", relative_path.display())?;
                 for (algo, hash_val) in &hashes {
                     writeln!(manifest, "  {}: {}", algo, hash_val)?;
+                }
+                if config.read_verification {
+                    writeln!(manifest, "  Verification: {}", verification_status)?;
                 }
                 writeln!(manifest, "")?;
                 files_copied += 1;
@@ -424,11 +462,12 @@ pub async fn acquire_logical(
     writeln!(manifest, "Total Size:         {} bytes", bytes_read)?;
     writeln!(manifest, "=== END OF MANIFEST ===")?;
     
+    let global_hashes = global_hashers.finalize();
+    
     let result = AcquisitionResult {
         bytes_read,
         bad_sectors: 0,
-        // ponytail: logical mode hashes per-file into manifest; no single image hash.
-        hashes: HashMap::new(),
+        hashes: global_hashes,
     };
     
     Ok(result)
@@ -709,4 +748,71 @@ pub async fn compute_file_hash(
     })
     .await
     .map_err(|e| crate::error::ForgelensError::Backend(e.to_string()))?
+}
+
+pub async fn compute_logical_hash(
+    dir_path: &std::path::Path,
+    hash_algorithms: &[HashAlgorithm],
+    progress_tx: Sender<ProgressEvent>,
+) -> Result<HashMap<HashAlgorithm, String>> {
+    let mut stack = vec![dir_path.to_path_buf()];
+    let mut all_files = Vec::new();
+    
+    while let Some(dir) = stack.pop() {
+        if progress_tx.is_closed() {
+            return Err(crate::error::ForgelensError::Cancelled);
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.is_file() {
+                    all_files.push(path);
+                }
+            }
+        }
+    }
+    
+    all_files.sort_by(|a, b| {
+        let rel_a = a.strip_prefix(dir_path).unwrap_or(a);
+        let rel_b = b.strip_prefix(dir_path).unwrap_or(b);
+        rel_a.cmp(rel_b)
+    });
+
+    let total_size: u64 = all_files.iter().map(|f| f.metadata().map(|m| m.len()).unwrap_or(0)).sum();
+    let mut bytes_hashed = 0u64;
+    let mut hashers = MultiHasher::new(hash_algorithms);
+    let mut buf = vec![0u8; 1024 * 1024];
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
+
+    for file_path in all_files {
+        if progress_tx.is_closed() {
+            return Err(crate::error::ForgelensError::Cancelled);
+        }
+        if let Ok(mut src_file) = std::fs::File::open(&file_path) {
+            use std::io::Read;
+            while let Ok(n) = src_file.read(&mut buf) {
+                if n == 0 { break; }
+                hashers.update(std::sync::Arc::new(buf[..n].to_vec()));
+                bytes_hashed += n as u64;
+
+                let now = Instant::now();
+                if now.duration_since(last_progress_time).as_millis() >= 500 {
+                    let elapsed = now.duration_since(start_time).as_secs_f64();
+                    let speed_bps = if elapsed > 0.0 { bytes_hashed as f64 / elapsed } else { 0.0 };
+                    let _ = progress_tx.send(ProgressEvent::Progress {
+                        bytes_read: bytes_hashed,
+                        total_size,
+                        speed_bps,
+                        bad_sectors: 0,
+                    }).await;
+                    last_progress_time = now;
+                }
+            }
+        }
+    }
+
+    Ok(hashers.finalize())
 }

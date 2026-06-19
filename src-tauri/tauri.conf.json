@@ -1,27 +1,31 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Forgelens Disk Imager",
-  "version": "0.1.14",
-  "identifier": "com.forgelens.imager",
-  "build": {
-    "frontendDist": "../frontend"
-  },
-  "app": {
-    "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "⚡ FORGELENS DISK IMAGER",
-        "width": 960,
-        "height": 680,
-        "resizable": true
-      }
-    ],
-    "security": {
-      "csp": null
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "Forensic Disk Imager",
+    "version": "0.1.14",
+    "identifier": "com.forensic.imager",
+    "build": {
+        "frontendDist": "../frontend"
+    },
+    "app": {
+        "withGlobalTauri": true,
+        "windows": [
+            {
+                "title": "Forensic Disk Imager",
+                "width": 1200,
+                "height": 900,
+                "resizable": true
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "resources": [
+            "winpmem/*",
+            "avml/*"
+        ]
     }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all"
-  }
 }

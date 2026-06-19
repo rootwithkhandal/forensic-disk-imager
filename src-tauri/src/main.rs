@@ -243,7 +243,25 @@ async fn start_acquisition(
 
         let start_time_utc = chrono::Utc::now();
 
+        let mut pre_hashes = HashMap::new();
         if is_logical {
+            if config_input.hash_verification == "Pre & Post-Acquisition" && start_offset == 0 {
+                log("[ACQUISITION] Pre-Acquisition hashing started (Logical)...".to_string()).await;
+                match crate::acquisition::compute_logical_hash(std::path::Path::new(&source_path), &algos, tx.clone()).await {
+                    Ok(hashes) => {
+                        pre_hashes = hashes.clone();
+                        if let Some(hash_val) = hashes.values().next() {
+                            log(format!("[ACQUISITION] Pre-Acquisition Hash (Logical): {}", hash_val)).await;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(ProgressEvent::Error(format!("Pre-Acquisition hash error: {}", e))).await;
+                        clear_active_task(&app_handle);
+                        return;
+                    }
+                }
+            }
+
             log("[ACQUISITION] Executing logical folder copying...".to_string()).await;
             match crate::acquisition::acquire_logical(
                 std::path::Path::new(&source_path),
@@ -254,6 +272,19 @@ async fn start_acquisition(
             .await
             {
                 Ok(result) => {
+                    let mut post_hashes = None;
+                    if config_input.hash_verification.contains("Post") {
+                        log("[ACQUISITION] Computing post-acquisition hash for logical destination...".to_string()).await;
+                        match crate::acquisition::compute_logical_hash(&dest_file_path, &algos, tx.clone()).await {
+                            Ok(hashes) => {
+                                post_hashes = Some(hashes);
+                            }
+                            Err(e) => {
+                                log(format!("[ERROR] Post-acquisition hash failed: {}", e)).await;
+                            }
+                        }
+                    }
+
                     let end_time_utc = chrono::Utc::now();
                     let report_data = crate::report::ReportData {
                         case_number: config.case_number.clone(),
@@ -270,9 +301,9 @@ async fn start_acquisition(
                         start_time: start_time_utc,
                         end_time: end_time_utc,
                         bad_sectors: 0,
-                        pre_hashes: HashMap::new(),
+                        pre_hashes,
                         hashes: result.hashes.clone(),
-                        post_hashes: None,
+                        post_hashes,
                         vss_snapshot_id: None,
                         ram_dump_path: None,
                         ram_dump_size: None,

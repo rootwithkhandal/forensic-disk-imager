@@ -37,8 +37,34 @@ fn find_memory_tool(custom_path: &Option<String>) -> Option<PathBuf> {
             return Some(p);
         }
     }
-    // ponytail: let Command::new search PATH for us.
-    Some(PathBuf::from("winpmem_mini_x64.exe"))
+    
+    // Check various potential locations for the bundled winpmem tools
+    let candidates = [
+        PathBuf::from("winpmem/winpmem_mini_x64_rc2.exe"),
+        PathBuf::from("src-tauri/winpmem/winpmem_mini_x64_rc2.exe"),
+        PathBuf::from("../src-tauri/winpmem/winpmem_mini_x64_rc2.exe"),
+        PathBuf::from("winpmem/winpmem_mini_x86.exe"),
+        PathBuf::from("src-tauri/winpmem/winpmem_mini_x86.exe"),
+        PathBuf::from("../src-tauri/winpmem/winpmem_mini_x86.exe"),
+    ];
+    
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Some(candidate.clone());
+        }
+    }
+    
+    if let Ok(mut exe_path) = std::env::current_exe() {
+        exe_path.pop(); // remove exe name
+        // Try looking next to the executable
+        let p1 = exe_path.join("winpmem").join("winpmem_mini_x64_rc2.exe");
+        if p1.exists() { return Some(p1); }
+        let p2 = exe_path.join("winpmem").join("winpmem_mini_x86.exe");
+        if p2.exists() { return Some(p2); }
+    }
+
+    // fallback to searching PATH with the new default name
+    Some(PathBuf::from("winpmem_mini_x64_rc2.exe"))
 }
 
 #[cfg(target_os = "linux")]
@@ -50,13 +76,26 @@ fn find_memory_tool(custom_path: &Option<String>) -> Option<PathBuf> {
         }
     }
 
-    // Check for avml (Microsoft's Azure VM memory acquirer)
-    let candidates = ["avml", "/usr/bin/avml", "/usr/local/bin/avml"];
-    for name in &candidates {
-        let p = PathBuf::from(name);
-        if p.exists() {
-            return Some(p);
+    // Check various potential locations for the bundled avml tools
+    let candidates = [
+        PathBuf::from("avml/avml"),
+        PathBuf::from("src-tauri/avml/avml"),
+        PathBuf::from("../src-tauri/avml/avml"),
+        PathBuf::from("/usr/bin/avml"),
+        PathBuf::from("/usr/local/bin/avml"),
+    ];
+    
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Some(candidate.clone());
         }
+    }
+    
+    if let Ok(mut exe_path) = std::env::current_exe() {
+        exe_path.pop(); // remove exe name
+        // Try looking next to the executable
+        let p1 = exe_path.join("avml").join("avml");
+        if p1.exists() { return Some(p1); }
     }
 
     // Check if /proc/kcore is available (requires root)
