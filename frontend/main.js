@@ -583,6 +583,7 @@ function setupEventListeners() {
       capture_ram: document.getElementById('live-cb-ram').checked,
       capture_locked_files: document.getElementById('live-cb-locked').checked,
       run_consistency_check: document.getElementById('live-cb-consistency').checked,
+      image_vss: document.getElementById('live-cb-image-vss').checked,
       auto_cleanup_vss: document.getElementById('live-cb-cleanup').checked,
       ram_tool_path: document.getElementById('live-ram-tool').value || null,
       hash_algorithms: ['SHA256']

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ FORGELENS Forensic Disk Imager</title>
+  <title>Forensic Disk Imager</title>
   <meta name="description" content="Professional cross-platform forensic disk imaging tool written in Rust and powered by Tauri.">
   <link rel="stylesheet" href="style.css">
   <!-- Google Fonts Inter and JetBrains Mono -->
@@ -13,12 +13,12 @@
 </head>
 <body>
   <div class="app-container">
-    
+
     <!-- HEADER PANEL -->
     <header class="app-header">
       <div class="header-brand">
         <span class="logo-icon">⚡</span>
-        <h1 id="app-title">FORGELENS DISK IMAGER</h1>
+        <h1 id="app-title">Forensic DISK IMAGER</h1>
         <span class="version-tag">v0.1.14</span>
       </div>
       <div class="header-status">
@@ -38,14 +38,14 @@
 
     <!-- MAIN DASHBOARD CONTENT -->
     <div class="dashboard-body">
-      
+
       <!-- SIDEBAR: DEVICE SELECTION -->
       <aside class="sidebar-panel" id="sidebar-panel">
         <div class="panel-header">
           <h2>📁 Source Selector</h2>
           <button id="btn-rescan" class="btn btn-secondary btn-sm" title="Scan block devices">↻ Rescan</button>
         </div>
-        
+
         <!-- Toggle Mode -->
         <div class="mode-selector">
           <button id="mode-physical" class="mode-btn active" data-mode="Physical">Physical Drive</button>
@@ -77,17 +77,17 @@
 
       <!-- CONFIGURATION SECTION -->
       <main class="main-panel">
-        
+
         <!-- TAB 1: DISK IMAGING -->
         <div id="tab-imaging-content" class="tab-panel">
           <div class="panel-header">
             <h2>⚙ Acquisition Configuration</h2>
           </div>
-          
+
           <div class="scroll-area">
             <form id="config-form" class="config-form">
               <div class="form-grid">
-                
+
                 <!-- Evidence Details -->
                 <div class="form-group">
                   <label for="input-evidence-id">Evidence ID:</label>
@@ -246,7 +246,7 @@
           <div class="scroll-area">
             <form id="triage-form" class="config-form">
               <div class="form-grid">
-                
+
                 <div class="form-group full-width">
                   <label for="triage-dest-path">Triage Output Directory:</label>
                   <div class="input-browse-group">
@@ -334,7 +334,11 @@
                   <span>Run Consistency Validation</span>
                 </label>
                 <label class="checkbox-label">
-                  <input type="checkbox" id="live-cb-cleanup" checked>
+                  <input type="checkbox" id="live-cb-image-vss">
+                  <span>Create Physical Image of VSS Snapshot</span>
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" id="live-cb-cleanup">
                   <span>Auto-cleanup VSS after acquisition</span>
                 </label>
               </div>
@@ -347,7 +351,7 @@
                 <button type="button" class="btn btn-secondary" id="btn-browse-live-dest">Browse...</button>
               </div>
             </div>
-            
+
             <div class="form-group full-width" id="ram-tool-group">
               <label for="live-ram-tool">RAM Acquisition Tool Path (Optional)</label>
               <div class="input-browse-group">
@@ -398,7 +402,7 @@
           <div class="scroll-area">
             <div class="config-form">
               <div class="form-grid">
-                
+
                 <div class="form-group full-width">
                   <label for="mount-source-path">Select Forensic Image File:</label>
                   <div class="input-browse-group">
@@ -437,7 +441,7 @@
     <!-- BOTTOM SECTION: LIVE PROGRESS & SYSTEM LOGS -->
     <footer class="app-footer">
       <div class="footer-layout">
-        
+
         <!-- CONSOLE LOGGER -->
         <div class="console-box">
           <div class="console-header">
@@ -454,14 +458,14 @@
 
         <!-- JOB MONITOR & CONTROLS -->
         <div class="monitor-box">
-          
+
           <!-- State 1: Idle (Show start buttons) -->
           <div id="monitor-idle" class="monitor-substate">
             <div class="status-summary-box">
               <span class="status-indicator-dot dot-idle"></span>
               <span id="idle-status-text" class="status-text">Ready for forensic configuration.</span>
             </div>
-            
+
             <div class="action-buttons">
               <button id="btn-resume-acquisition" class="btn btn-warning hidden">⚡ Resume Job</button>
               <button id="btn-start-acquisition" class="btn btn-primary">⚡ Start Acquisition</button>

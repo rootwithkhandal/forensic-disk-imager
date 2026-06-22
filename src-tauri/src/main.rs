@@ -56,6 +56,7 @@ struct StartLiveConfig {
     capture_ram: bool,
     capture_locked_files: bool,
     run_consistency_check: bool,
+    image_vss: bool,
     auto_cleanup_vss: bool,
     ram_tool_path: Option<String>,
     hash_algorithms: Vec<hasher::HashAlgorithm>,
@@ -694,6 +695,13 @@ async fn start_live_acquisition(
             "[LIVE] Starting live system acquisition pipeline...".to_string()
         )).await;
 
+        let mut source_size = 0u64;
+        if let Ok(vols) = list_volumes().await {
+            if let Some(vol) = vols.iter().find(|v| v.letter == config_input.volume) {
+                source_size = vol.total_size;
+            }
+        }
+
         // ── Step 1: Create VSS Snapshot ──
         #[cfg(target_os = "windows")]
         {
@@ -790,6 +798,81 @@ async fn start_live_acquisition(
             }
         }
 
+        // ── Step 3.5: VSS Physical Image ──
+        if config_input.image_vss {
+            if let Some(ref vss_path) = vss_device_path {
+                let _ = tx.send(ProgressEvent::Log(
+                    "[LIVE] Starting physical imaging of VSS snapshot...".to_string()
+                )).await;
+
+                match crate::platform::ActiveBackend::open_readonly(vss_path) {
+                    Ok(mut source_dev) => {
+                        if source_dev.size == 0 {
+                            source_dev.size = source_size;
+                        }
+                        let vss_dest_path = dest_dir.join("vss_image.dd");
+                        let config = crate::acquisition::AcquisitionConfig {
+                            hash_algorithms: config_input.hash_algorithms.clone(),
+                            block_size: 1024 * 1024,
+                            split_size: None,
+                            compression: crate::output::CompressionFormat::None,
+                            case_number: config_input.case_number.clone(),
+                            examiner: config_input.examiner.clone(),
+                            evidence_id: format!("{}-VSS", config_input.evidence_id),
+                            notes: "Physical image of VSS snapshot".to_string(),
+                            pre_hash: None,
+                            imaging_mode: "Physical".to_string(),
+                            format: "Raw / DD (.dd)".to_string(),
+                            read_verification: false,
+                            keywords: Vec::new(),
+                        };
+
+                        match crate::output::OutputWriter::new(&vss_dest_path, None, config.compression, false, false) {
+                            Ok(dest_writer) => {
+                                let checkpoint_path = dest_dir.join("vss_image.json");
+                                match crate::acquisition::acquire(
+                                    &mut source_dev,
+                                    dest_writer,
+                                    &config,
+                                    tx.clone(),
+                                    &checkpoint_path,
+                                    0,
+                                ).await {
+                                    Ok(result) => {
+                                        let _ = tx.send(ProgressEvent::Log(
+                                            format!("[LIVE] VSS imaging complete: {} bytes acquired.", result.bytes_read)
+                                        )).await;
+                                        if checkpoint_path.exists() {
+                                            let _ = std::fs::remove_file(checkpoint_path);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(ProgressEvent::Log(
+                                            format!("[LIVE] WARNING: VSS imaging failed: {}. Continuing.", e)
+                                        )).await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(ProgressEvent::Log(
+                                    format!("[LIVE] WARNING: Failed to create output writer for VSS image: {}. Continuing.", e)
+                                )).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(ProgressEvent::Log(
+                            format!("[LIVE] WARNING: Failed to open VSS device for imaging: {}. Continuing.", e)
+                        )).await;
+                    }
+                }
+            } else {
+                let _ = tx.send(ProgressEvent::Log(
+                    "[LIVE] Skipping VSS imaging: no VSS snapshot available.".to_string()
+                )).await;
+            }
+        }
+
         // ── Step 4: Consistency Validation ──
         // This runs only if we have both an image and a VSS path
         // For now, consistency check needs a previously created image — skip if no VSS
@@ -840,13 +923,6 @@ async fn start_live_acquisition(
         }
 
         // ── Step 6: Generate Report ──
-        let mut source_size = 0u64;
-        if let Ok(vols) = list_volumes().await {
-            if let Some(vol) = vols.iter().find(|v| v.letter == config_input.volume) {
-                source_size = vol.total_size;
-            }
-        }
-
         let end_time_utc = chrono::Utc::now();
         let report_data = crate::report::ReportData {
             case_number: config_input.case_number.clone(),

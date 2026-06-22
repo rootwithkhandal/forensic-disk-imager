@@ -36,34 +36,35 @@ impl VssSnapshot {
 
         // Use wmic shadowcopy call create to work on both Server and Client editions
         let wmic_output = Command::new("wmic")
-            .args(["shadowcopy", "call", "create", &format!("Volume='{}'", vol)])
+            .args(["shadowcopy", "call", "create", &format!("Volume={}", vol)])
             .output();
 
         let mut shadow_id = None;
 
-        match wmic_output {
-            Ok(out) if out.status.success() => {
+        if let Ok(out) = wmic_output {
+            if out.status.success() {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 shadow_id = Self::parse_shadow_id_from_wmic(&stdout);
             }
-            _ => {
-                // Fallback to PowerShell using CIM (wmic is deprecated in Win 11 24H2+)
-                let ps_cmd = format!("(Invoke-CimMethod -ClassName Win32_ShadowCopy -MethodName Create -Arguments @{{Volume='{}'}}).ShadowID", vol);
-                let ps_out = Command::new("powershell")
-                    .args(["-NoProfile", "-Command", &ps_cmd])
-                    .output()
-                    .map_err(|e| ForgelensError::VssError(format!("Failed to execute PowerShell VSS fallback: {}", e)))?;
+        }
 
-                if ps_out.status.success() {
-                    let stdout = String::from_utf8_lossy(&ps_out.stdout);
-                    let id = stdout.trim();
-                    if !id.is_empty() {
-                        shadow_id = Some(id.to_string());
-                    }
-                } else {
-                    let stderr = String::from_utf8_lossy(&ps_out.stderr);
-                    return Err(ForgelensError::VssError(format!("WMI and PowerShell VSS creation failed. PowerShell error: {}", stderr.trim())));
+        if shadow_id.is_none() {
+            // Fallback to PowerShell using CIM (wmic is deprecated in Win 11 24H2+)
+            let ps_cmd = format!("(Invoke-CimMethod -ClassName Win32_ShadowCopy -MethodName Create -Arguments @{{Volume='{}'}}).ShadowID", vol);
+            let ps_out = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &ps_cmd])
+                .output()
+                .map_err(|e| ForgelensError::VssError(format!("Failed to execute PowerShell VSS fallback: {}", e)))?;
+
+            if ps_out.status.success() {
+                let stdout = String::from_utf8_lossy(&ps_out.stdout);
+                let id = stdout.trim();
+                if !id.is_empty() {
+                    shadow_id = Some(id.to_string());
                 }
+            } else {
+                let stderr = String::from_utf8_lossy(&ps_out.stderr);
+                return Err(ForgelensError::VssError(format!("WMI and PowerShell VSS creation failed. PowerShell error: {}", stderr.trim())));
             }
         }
 
