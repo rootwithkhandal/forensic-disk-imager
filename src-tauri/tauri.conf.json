@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Forgelens Disk Imager",
+  "version": "0.1.14",
+  "identifier": "com.forgelens.imager",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "⚡ FORGELENS DISK IMAGER",
+        "width": 960,
+        "height": 680,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

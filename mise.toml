@@ -1,0 +1,10 @@
+[tools]
+rust = "stable"
+
+[tasks.build]
+description = "Build the forensic imager in release mode"
+run = "cargo build --release"
+
+[tasks.run]
+description = "Run the forensic imager in release mode"
+run = "cargo run --release"

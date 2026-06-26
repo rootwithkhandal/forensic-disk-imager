@@ -1,0 +1,54 @@
+# Cargo
+/target/
+Cargo.lock
+target/
+
+# IDEs and Editors
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+Thumbs.db
+.DS_Store
+
+# Local mise/tooling files
+.mise.local.toml
+.env
+.env.*
+
+new-fetures.md
+prompt.md
+test.txt
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Forensic Images & Artifacts (Evidence Data)
+*.dd
+*.e01
+*.ex01
+*.aff
+*.smart
+*.signature
+*.report.txt
+*.report.html
+*.report.json
+*.report.csv
+*.checkpoint.json
+
+# Triage & Collection Outputs
+triage/
+triage_*/
+
+# Tauri-Specific
+src-tauri/target/
+src-tauri/*.key
+src-tauri/*.pub
+
+new-fetures.txt

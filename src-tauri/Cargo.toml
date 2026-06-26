@@ -1,0 +1,46 @@
+[package]
+name = "forgelens-disk-imager"
+version = "0.1.14"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "2.0.0", features = ["devtools"] }
+rfd = "0.14"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+md-5 = "0.10"
+sha1 = "0.10"
+hex = "0.4"
+flate2 = "1"           # gzip compression
+zstd = "0.13"          # zstd compression
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.29", features = ["ioctl", "fs"] }
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_UI_Shell",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+io-kit-sys = "0.4"
+libc = "0.2"
+
+[build-dependencies]
+tauri-build = "2.0.0"
+winres = "0.1"

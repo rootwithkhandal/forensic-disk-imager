@@ -1,0 +1,11 @@
+{
+  "$schema": "../../node_modules/@tauri-apps/cli/schema.json",
+  "identifier": "default",
+  "description": "Default permissions for Forgelens app",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default"
+  ]
+}

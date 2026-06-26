@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ FORGELENS Forensic Disk Imager</title>
+  <meta name="description" content="Professional cross-platform forensic disk imaging tool written in Rust and powered by Tauri.">
+  <link rel="stylesheet" href="style.css">
+  <!-- Google Fonts Inter and JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- HEADER PANEL -->
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="logo-icon">⚡</span>
+        <h1 id="app-title">FORGELENS DISK IMAGER</h1>
+        <span class="version-tag">v0.1.14</span>
+      </div>
+      <div class="header-status">
+        <div id="admin-badge" class="badge badge-loading">Checking privileges...</div>
+        <div id="clock-display" class="clock-display">00:00:00 UTC</div>
+      </div>
+    </header>
+
+    <!-- TAB NAVIGATION BAR -->
+    <div class="tab-navigation">
+      <button class="tab-btn active" id="btn-tab-imaging" data-tab="imaging">📂 Disk Imaging</button>
+      <button class="tab-btn" id="btn-tab-triage" data-tab="triage">⚡ System Triage</button>
+      <button class="tab-btn" id="btn-tab-manager" data-tab="manager">📦 Image Manager</button>
+    </div>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <div class="dashboard-body">
+      
+      <!-- SIDEBAR: DEVICE SELECTION -->
+      <aside class="sidebar-panel" id="sidebar-panel">
+        <div class="panel-header">
+          <h2>📁 Source Selector</h2>
+          <button id="btn-rescan" class="btn btn-secondary btn-sm" title="Scan block devices">↻ Rescan</button>
+        </div>
+        
+        <!-- Toggle Mode -->
+        <div class="mode-selector">
+          <button id="mode-physical" class="mode-btn active" data-mode="Physical">Physical Drive</button>
+          <button id="mode-logical" class="mode-btn" data-mode="Logical">Logical Folder</button>
+        </div>
+
+        <!-- Devices Container -->
+        <div id="physical-container" class="source-container">
+          <div class="scroll-area">
+            <div id="device-list" class="device-list">
+              <!-- Devices loaded dynamically -->
+              <div class="info-message">Click "Rescan" to scan available block devices.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logical Container (hidden by default) -->
+        <div id="logical-container" class="source-container hidden">
+          <div class="logical-picker">
+            <label for="logical-source-input">Source Directory:</label>
+            <div class="input-browse-group">
+              <input type="text" id="logical-source-input" placeholder="Select source folder..." readonly>
+              <button id="btn-browse-source" class="btn btn-secondary">Browse...</button>
+            </div>
+            <p class="help-text">Logical mode copies all files and structures recursively from the source folder, calculating individual hashes for each file.</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CONFIGURATION SECTION -->
+      <main class="main-panel">
+        
+        <!-- TAB 1: DISK IMAGING -->
+        <div id="tab-imaging-content" class="tab-panel">
+          <div class="panel-header">
+            <h2>⚙ Acquisition Configuration</h2>
+          </div>
+          
+          <div class="scroll-area">
+            <form id="config-form" class="config-form">
+              <div class="form-grid">
+                
+                <!-- Evidence Details -->
+                <div class="form-group">
+                  <label for="input-evidence-id">Evidence ID:</label>
+                  <input type="text" id="input-evidence-id" placeholder="e.g., EVD-001" required>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-case-number">Case Number:</label>
+                  <input type="text" id="input-case-number" placeholder="e.g., CASE-2026-88" required>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-examiner">Examiner Name:</label>
+                  <input type="text" id="input-examiner" placeholder="e.g., Det. J. Miller" required>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-notes">Custody Notes:</label>
+                  <input type="text" id="input-notes" placeholder="e.g., USB flash drive retrieved from desk">
+                </div>
+
+                <!-- File System Options -->
+                <div class="form-group">
+                  <label for="select-format">Output Format:</label>
+                  <select id="select-format">
+                    <option value="Raw / DD (.dd)">Raw / DD (.dd)</option>
+                    <option value="E01 (.e01)">E01 Evidence Image (.e01)</option>
+                    <option value="EX01 (.ex01)">EX01 Evidence Image (.ex01)</option>
+                    <option value="AFF (.aff)">Advanced Forensic Format (.aff)</option>
+                    <option value="SMART (.smart)">SMART Image (.smart)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-dest-path">Destination Path:</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="input-dest-path" placeholder="Save evidence image to..." required readonly>
+                    <button type="button" id="btn-browse-dest" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="select-verification">Verification Hashing:</label>
+                  <select id="select-verification">
+                    <option value="Pre & Post-Acquisition">Pre & Post-Acquisition (Double-Verify)</option>
+                    <option value="Post-Acquisition Only">Post-Acquisition Only (Faster)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="select-blocksize">Block Size:</label>
+                  <select id="select-blocksize">
+                    <option value="512">512 KB</option>
+                    <option value="1024">1024 KB</option>
+                    <option value="2048">2048 KB</option>
+                  </select>
+                </div>
+
+                <!-- Hashing Algorithms -->
+                <div class="form-group full-width">
+                  <label>On-the-fly Hashing Algorithms:</label>
+                  <div class="checkbox-group">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="hash-md5" value="MD5" checked>
+                      <span>MD5</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="hash-sha1" value="SHA1">
+                      <span>SHA-1</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="hash-sha256" value="SHA256" checked>
+                      <span>SHA-256</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="hash-sha512" value="SHA512">
+                      <span>SHA-512</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Compression Settings -->
+                <div class="form-group">
+                  <label for="select-compression">Compression Format:</label>
+                  <select id="select-compression">
+                    <option value="None">None (Uncompressed)</option>
+                    <option value="Gzip">Gzip (Standard)</option>
+                    <option value="Zstd">Zstd (Fast & Efficient)</option>
+                  </select>
+                </div>
+
+                <!-- Splitting Settings -->
+                <div class="form-group">
+                  <label for="select-split">Image Splitting:</label>
+                  <select id="select-split">
+                    <option value="None">None (Single File)</option>
+                    <option value="650">650 MB (CD-R)</option>
+                    <option value="2000">2.0 GB (FAT32 Limit)</option>
+                    <option value="4300">4.3 GB (DVD-R)</option>
+                    <option value="Custom">Custom Size...</option>
+                  </select>
+                </div>
+
+                <div class="form-group hidden" id="custom-split-group">
+                  <label for="input-split-size">Custom Split (MB):</label>
+                  <input type="text" id="input-split-size" placeholder="e.g., 1024">
+                </div>
+
+                <!-- Read Verification -->
+                <div class="form-group checkbox-wrapper">
+                  <label class="checkbox-label" style="margin-top: 24px;">
+                    <input type="checkbox" id="check-read-verification">
+                    <span>Read Verification (Verify Writes)</span>
+                  </label>
+                </div>
+
+                <!-- Keyword Pre-scanning -->
+                <div class="form-group">
+                  <label for="input-keywords">Keyword Pre-Scanning (comma-separated):</label>
+                  <input type="text" id="input-keywords" placeholder="e.g., password, admin, key, secret">
+                </div>
+
+                <!-- Sparse & Signing Options -->
+                <div class="form-group checkbox-wrapper" style="flex-direction: row; gap: 20px; align-items: center; margin-top: 24px;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-sparse">
+                    <span>Sparse Imaging</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="check-digital-signature">
+                    <span>Digital Signing</span>
+                  </label>
+                </div>
+
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- TAB 2: SYSTEM TRIAGE -->
+        <div id="tab-triage-content" class="tab-panel hidden">
+          <div class="panel-header">
+            <h2>⚡ Rapid Forensic Triage & RAM Capture</h2>
+          </div>
+          <div class="scroll-area">
+            <form id="triage-form" class="config-form">
+              <div class="form-grid">
+                
+                <div class="form-group full-width">
+                  <label for="triage-dest-path">Triage Output Directory:</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="triage-dest-path" placeholder="Save triage files to..." required readonly>
+                    <button type="button" id="btn-browse-triage-dest" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group full-width">
+                  <label>Forensic Artifacts to Collect:</label>
+                  <div class="checkbox-group" style="flex-direction: column; gap: 12px;">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="triage-volatile" checked>
+                      <span>Volatile System State (Active processes, network sockets, kernel modules, RAM ranges)</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="triage-registry" checked>
+                      <span>Registry Hives & System Configurations (SYSTEM, SAM, SECURITY, user configurations)</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="triage-browsers" checked>
+                      <span>Browser Activity Metadata (Google Chrome history databases, cache indexes)</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="triage-eventlogs" checked>
+                      <span>Operating System Event Logs (System event logs, secure logs, syslog)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <p class="help-text full-width" style="grid-column: 1 / -1;">
+                  Rapid Triage collects volatile evidence and registry hives directly from the active system. Collected data is structured, timestamped, and packaged into the destination folder for instant forensic inspection.
+                </p>
+
+                <div class="form-group full-width" style="margin-top: 24px;">
+                  <button type="button" id="btn-start-triage" class="btn btn-primary" style="width: 260px;">⚡ Start Triage Collection</button>
+                </div>
+
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- TAB 3: IMAGE MANAGER -->
+        <div id="tab-manager-content" class="tab-panel hidden">
+          <div class="panel-header">
+            <h2>📦 Forensic Image Manager</h2>
+          </div>
+          <div class="scroll-area">
+            <div class="config-form">
+              <div class="form-grid">
+                
+                <div class="form-group full-width">
+                  <label for="mount-source-path">Select Forensic Image File:</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="mount-source-path" placeholder="Select image file (.dd, .e01, .aff)..." readonly>
+                    <button type="button" id="btn-browse-mount-src" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group full-width">
+                  <label for="mount-point-path">Mount Point (Folder):</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="mount-point-path" placeholder="Select mount directory..." readonly>
+                    <button type="button" id="btn-browse-mount-point" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group full-width" style="margin-top: 16px;">
+                  <div class="action-buttons" style="display: flex; gap: 16px;">
+                    <button type="button" id="btn-verify-image" class="btn btn-secondary" style="width: 220px;">🛡 Verify Hash Integrity</button>
+                    <button type="button" id="btn-mount-image" class="btn btn-primary" style="width: 220px;">🔌 Mount Read-Only</button>
+                  </div>
+                </div>
+
+                <div id="mount-status-box" class="help-text full-width hidden" style="grid-column: 1 / -1; border-left-color: var(--accent-primary);">
+                  Image mounted successfully in read-only write-blocked mode. You can safely explore the filesystem in your explorer.
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- BOTTOM SECTION: LIVE PROGRESS & SYSTEM LOGS -->
+    <footer class="app-footer">
+      <div class="footer-layout">
+        
+        <!-- CONSOLE LOGGER -->
+        <div class="console-box">
+          <div class="console-header">
+            <h3>📟 Forensic Console Log</h3>
+            <button id="btn-clear-log" class="btn-text">Clear</button>
+          </div>
+          <div id="console-logs" class="console-logs scroll-area">
+            <!-- Logs populated dynamically -->
+          </div>
+        </div>
+
+        <!-- JOB MONITOR & CONTROLS -->
+        <div class="monitor-box">
+          
+          <!-- State 1: Idle (Show start buttons) -->
+          <div id="monitor-idle" class="monitor-substate">
+            <div class="status-summary-box">
+              <span class="status-indicator-dot dot-idle"></span>
+              <span id="idle-status-text" class="status-text">Ready for forensic configuration.</span>
+            </div>
+            
+            <div class="action-buttons">
+              <button id="btn-resume-acquisition" class="btn btn-warning hidden">⚡ Resume Job</button>
+              <button id="btn-start-acquisition" class="btn btn-primary">⚡ Start Acquisition</button>
+            </div>
+          </div>
+
+          <!-- State 2: Active Acquisition (Show stats & progress bar) -->
+          <div id="monitor-active" class="monitor-substate hidden">
+            <div class="active-job-details">
+              <div class="job-meta">
+                <span class="job-badge anim-pulse">IMAGING</span>
+                <span id="txt-active-job-desc">Reading disk...</span>
+              </div>
+              <div class="job-cancel-action">
+                <button id="btn-cancel-acquisition" class="btn btn-danger">⏹ Cancel Job</button>
+              </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">IMAGING SPEED</div>
+                <div id="txt-stat-speed" class="stat-val text-teal">0.00 MB/s</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">ETA</div>
+                <div id="txt-stat-eta" class="stat-val text-teal">0m 0s</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">BAD SECTORS</div>
+                <div id="txt-stat-bad" class="stat-val text-red">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">COMPLETED</div>
+                <div id="txt-stat-percent" class="stat-val text-teal">0.0%</div>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-bar-wrapper">
+              <div class="progress-bar-track">
+                <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+              </div>
+              <div class="progress-bar-labels">
+                <span id="txt-bytes-progress">0 B / 0 B</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </footer>
+
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
