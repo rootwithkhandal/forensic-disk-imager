@@ -16,5 +16,5 @@ run = "git add . && git commit -m 'issue-resolved'"
 
 [tasks.push]
 description = "Push changes to git"
-depends = ["git"]
+depends = ["commit"]
 run = "git push"

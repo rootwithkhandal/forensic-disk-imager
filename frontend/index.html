@@ -19,7 +19,7 @@
       <div class="header-brand">
         <span class="logo-icon">⚡</span>
         <h1 id="app-title">Forensic DISK IMAGER</h1>
-        <span class="version-tag">v0.1.14</span>
+        <span class="version-tag">v2.0.2</span>
       </div>
       <div class="header-status">
         <button id="btn-theme-toggle" class="btn btn-secondary btn-sm" style="background: transparent; border-color: var(--color-border); color: var(--text-main);" title="Toggle Light/Dark Theme">☀</button>
@@ -35,6 +35,7 @@
       <button class="tab-btn" id="btn-tab-live" data-tab="live">🔴 Live Acquisition</button>
       <button class="tab-btn" id="btn-tab-timeline" data-tab="timeline">⏱️ Timeline</button>
       <button class="tab-btn" id="btn-tab-cases" data-tab="cases">📁 Case Management</button>
+      <button class="tab-btn" id="btn-tab-ram" data-tab="ram">🧠 RAM Analysis</button>
     </div>
 
     <!-- MAIN DASHBOARD CONTENT -->
@@ -481,6 +482,80 @@
 
                 <div class="form-group full-width" style="margin-top: 24px;">
                   <button type="button" id="btn-start-timeline" class="btn btn-primary" style="width: 260px;">▶ Generate Timeline</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- TAB 6: RAM ANALYSIS (VOLATILITY 3) -->
+        <div id="tab-ram-content" class="tab-panel hidden">
+          <div class="panel-header">
+            <h2>🧠 Memory Forensic Analysis (Volatility 3) & Threat Enrichment</h2>
+          </div>
+          <div class="scroll-area">
+            <form id="ram-form" class="config-form">
+              <p class="help-text full-width" style="grid-column: 1 / -1; margin-bottom: 15px;">
+                Analyze acquired RAM memory dumps (.raw, .vmem, .dmp) using Volatility 3 profiles. Enrich detected network artifacts with Threat Intelligence APIs (AbuseIPDB, VirusTotal).
+              </p>
+              <div class="form-grid">
+                
+                <div class="form-group full-width">
+                  <label for="ram-image-path">Memory Dump Image (.raw / .vmem / .dmp):</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="ram-image-path" placeholder="Select memory dump file..." required readonly style="flex: 1;">
+                    <button type="button" id="btn-browse-ram-image" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group full-width">
+                  <label for="ram-vol-path">Volatility 3 Executable / Script Path:</label>
+                  <div class="input-browse-group">
+                    <input type="text" id="ram-vol-path" placeholder="Path to vol.py, vol.exe, or volatility3 executable..." required readonly style="flex: 1;">
+                    <button type="button" id="btn-browse-ram-vol" class="btn btn-secondary">Browse...</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="ram-profile-select">Analysis Plugin / Profile:</label>
+                  <select id="ram-profile-select" style="padding: 10px; background: var(--bg-deep); border: 1px solid var(--color-border); color: var(--text-main); border-radius: 6px;">
+                    <option value="windows.pslist.PsList">Windows Running Processes (windows.pslist.PsList)</option>
+                    <option value="windows.netstat.NetStat">Windows Network Connections (windows.netstat.NetStat)</option>
+                    <option value="windows.cmdline.CmdLine">Windows Command Lines (windows.cmdline.CmdLine)</option>
+                    <option value="windows.filescan.FileScan">Windows File Scan (windows.filescan.FileScan)</option>
+                    <option value="windows.registry.printkey.PrintKey">Windows Registry Keys (windows.registry.printkey.PrintKey)</option>
+                    <option value="windows.malfind.Malfind">Windows Injected Code / Malfind (windows.malfind.Malfind)</option>
+                    <option value="linux.pslist.PsList">Linux Running Processes (linux.pslist.PsList)</option>
+                    <option value="mac.pslist.PsList">macOS Running Processes (mac.pslist.PsList)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label>Threat Intelligence Enrichment:</label>
+                  <div class="checkbox-group" style="flex-direction: column; gap: 8px; margin-top: 6px;">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="ram-enrich-abuseip" checked>
+                      <span>AbuseIPDB IP Reputation Check</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="ram-enrich-vt">
+                      <span>VirusTotal Hash Lookup</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="ram-key-abuseip">AbuseIPDB API Key (Optional):</label>
+                  <input type="password" id="ram-key-abuseip" placeholder="Enter AbuseIPDB Key...">
+                </div>
+
+                <div class="form-group">
+                  <label for="ram-key-vt">VirusTotal API Key (Optional):</label>
+                  <input type="password" id="ram-key-vt" placeholder="Enter VirusTotal Key...">
+                </div>
+
+                <div class="form-group full-width" style="margin-top: 24px;">
+                  <button type="button" id="btn-start-ram-analysis" class="btn btn-primary" style="width: 280px;">▶ Start Volatility Analysis</button>
                 </div>
               </div>
             </form>

@@ -285,7 +285,19 @@ const elements = {
   btnBrowseTimelineImage: document.getElementById('btn-browse-timeline-image'),
   timelineDestPath: document.getElementById('timeline-dest-path'),
   btnBrowseTimelineDest: document.getElementById('btn-browse-timeline-dest'),
-  btnStartTimeline: document.getElementById('btn-start-timeline')
+  btnStartTimeline: document.getElementById('btn-start-timeline'),
+
+  // RAM Analysis
+  ramImagePath: document.getElementById('ram-image-path'),
+  btnBrowseRamImage: document.getElementById('btn-browse-ram-image'),
+  ramVolPath: document.getElementById('ram-vol-path'),
+  btnBrowseRamVol: document.getElementById('btn-browse-ram-vol'),
+  ramProfileSelect: document.getElementById('ram-profile-select'),
+  ramEnrichAbuseIp: document.getElementById('ram-enrich-abuseip'),
+  ramEnrichVt: document.getElementById('ram-enrich-vt'),
+  ramKeyAbuseIp: document.getElementById('ram-key-abuseip'),
+  ramKeyVt: document.getElementById('ram-key-vt'),
+  btnStartRamAnalysis: document.getElementById('btn-start-ram-analysis')
 };
 
 // Initialize Application
@@ -505,7 +517,9 @@ function setupEventListeners() {
   document.getElementById('btn-tab-imaging').addEventListener('click', () => switchTab('imaging'));
   document.getElementById('btn-tab-triage').addEventListener('click', () => switchTab('triage'));
   document.getElementById('btn-tab-live').addEventListener('click', () => switchTab('live'));
+  document.getElementById('btn-tab-timeline').addEventListener('click', () => switchTab('timeline'));
   document.getElementById('btn-tab-cases').addEventListener('click', () => { switchTab('cases'); loadCases(); });
+  document.getElementById('btn-tab-ram').addEventListener('click', () => switchTab('ram'));
 
   document.getElementById('btn-refresh-cases').addEventListener('click', loadCases);
 
@@ -770,9 +784,97 @@ function setupEventListeners() {
     });
   }
 
+  // RAM Analysis Handlers
+  if (elements.btnBrowseRamImage) {
+    elements.btnBrowseRamImage.addEventListener('click', async () => {
+      try {
+        const file = await invoke('browse_file', { ext: 'raw' });
+        if (file) {
+          elements.ramImagePath.value = file;
+          logMessage('SYSTEM', 'Selected memory dump for analysis: ' + file);
+        }
+      } catch (e) {
+        logMessage('ERROR', 'Failed to browse memory dump: ' + e);
+      }
+    });
+  }
+
+  if (elements.btnBrowseRamVol) {
+    elements.btnBrowseRamVol.addEventListener('click', async () => {
+      try {
+        const file = await invoke('browse_file', { ext: 'exe' });
+        if (file) {
+          elements.ramVolPath.value = file;
+          logMessage('SYSTEM', 'Selected Volatility 3 executable: ' + file);
+        }
+      } catch (e) {
+        logMessage('ERROR', 'Failed to browse Volatility executable: ' + e);
+      }
+    });
+  }
+
+  if (elements.btnStartRamAnalysis) {
+    elements.btnStartRamAnalysis.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const imagePath = elements.ramImagePath.value;
+      const volPath = elements.ramVolPath.value;
+      
+      if (!imagePath || !volPath) {
+        alert('Please select both a memory dump file and the Volatility 3 executable/script path.');
+        return;
+      }
+      
+      const config = {
+        image_path: imagePath,
+        vol_path: volPath,
+        profile: elements.ramProfileSelect.value,
+        enrich_vt: elements.ramEnrichVt ? elements.ramEnrichVt.checked : false,
+        enrich_mb: false,
+        enrich_abuseip: elements.ramEnrichAbuseIp ? elements.ramEnrichAbuseIp.checked : false,
+        vt_key: elements.ramKeyVt ? elements.ramKeyVt.value : '',
+        mb_key: '',
+        abuseip_key: elements.ramKeyAbuseIp ? elements.ramKeyAbuseIp.value : ''
+      };
+      
+      try {
+        logMessage('VOLATILITY', `Starting Volatility 3 analysis [Profile: ${config.profile}]...`);
+        elements.btnStartRamAnalysis.disabled = true;
+        elements.btnStartRamAnalysis.textContent = 'Running Analysis...';
+        
+        await invoke('start_volatility_analysis', { config });
+      } catch (err) {
+        logMessage('ERROR', 'Failed to start Volatility analysis: ' + err);
+        alert('Failed to start Volatility analysis: ' + err);
+        elements.btnStartRamAnalysis.disabled = false;
+        elements.btnStartRamAnalysis.textContent = '▶ Start Volatility Analysis';
+      }
+    });
+  }
+
   // Listen to Tauri Backend events
   listen('acquisition-event', (event) => {
     handleBackendEvent(event.payload);
+  });
+
+  listen('volatility-event', (event) => {
+    const { type, data } = event.payload;
+    if (type === 'Log') {
+      logMessage('VOLATILITY', data);
+    } else if (type === 'Error') {
+      logMessage('ERROR', '[VOLATILITY ERROR] ' + data);
+      alert('Volatility Analysis Error:\n' + data);
+      if (elements.btnStartRamAnalysis) {
+        elements.btnStartRamAnalysis.disabled = false;
+        elements.btnStartRamAnalysis.textContent = '▶ Start Volatility Analysis';
+      }
+    } else if (type === 'Finished') {
+      logMessage('SYSTEM', '=== VOLATILITY ANALYSIS COMPLETED ===');
+      alert('Volatility Analysis Completed!');
+      if (elements.btnStartRamAnalysis) {
+        elements.btnStartRamAnalysis.disabled = false;
+        elements.btnStartRamAnalysis.textContent = '▶ Start Volatility Analysis';
+      }
+    }
   });
 }
 
@@ -805,6 +907,10 @@ function switchTab(tabName) {
   } else if (tabName === 'cases') {
     document.getElementById('btn-tab-cases').classList.add('active');
     document.getElementById('tab-cases-content').classList.remove('hidden');
+    document.getElementById('sidebar-panel').classList.add('hidden');
+  } else if (tabName === 'ram') {
+    document.getElementById('btn-tab-ram').classList.add('active');
+    document.getElementById('tab-ram-content').classList.remove('hidden');
     document.getElementById('sidebar-panel').classList.add('hidden');
   }
 }

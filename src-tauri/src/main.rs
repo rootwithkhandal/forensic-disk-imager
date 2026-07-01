@@ -16,6 +16,7 @@ mod yara_scanner;
 mod pdf_report;
 mod triage_db;
 pub mod timeline;
+mod ram_analysis;
 
 use platform::{ActiveBackend, DeviceBackend, DeviceInfo};
 use acquisition::{AcquisitionConfig, ProgressEvent};
@@ -1117,7 +1118,8 @@ fn main() {
             crate::case_management::export_case_report,
             browse_yara_folder,
             query_triage_db,
-            generate_image_timeline
+            generate_image_timeline,
+            crate::ram_analysis::start_volatility_analysis
         ])
         .setup(|app| {
             let _ = crate::case_management::init_db(app.handle());

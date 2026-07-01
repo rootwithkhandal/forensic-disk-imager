@@ -8,6 +8,7 @@ use crate::acquisition::ProgressEvent;
 use std::collections::HashMap;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct VolatilityConfig {
     pub image_path: String,
     pub vol_path: String,
