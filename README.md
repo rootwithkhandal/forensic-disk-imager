@@ -21,6 +21,7 @@
 | **🛡️ Threat Intelligence Enrichment** | Automated real-time IOC enrichment during memory analysis. Verifies extracted IP addresses against **AbuseIPDB** reputation scores and queries file/process hashes against **VirusTotal**. |
 | **⏱️ Timeline Generator** | Automated chronological artifact reconstruction. Extracts and parses timestamps from MFT records, `$LogFile`, and Ext4 journals to produce unified master timelines exported to structured **CSV** and **JSON** formats. |
 | **🔍 On-the-Fly YARA & Keyword Scanning** | Powered by a pure-Rust **YARA-X** engine. Performs real-time pattern matching against custom `.yar` rulesets and regular expression keyword searches simultaneously while streaming disk or memory data. |
+| **🧩 Extensible Plugin Platform** | Modular plugin architecture supporting compiled native shared libraries (`.so`, `.dll`, `.dylib`) and sandboxed WebAssembly (`.wasm`) modules via `wasmtime`. Features standardized lifecycle hooks (`pre_acquisition`, `on_block`, `post_acquisition`) for real-time data streaming, custom hashing, and automated report enrichment. |
 | **🔐 4-Algorithm Hash Verification** | Simultaneous single-pass hashing using **MD5, SHA-1, SHA-256, and SHA-512** to establish cryptographic proof of evidence integrity. Includes built-in checkpointing to pause and resume long acquisitions without data corruption. |
 | **📁 Case Management & Reporting** | Integrated SQLite case database tracking evidence tags, investigator notes, device metadata, and cryptographic hashes. Generates court-admissible HTML and PDF forensic reports. |
 
@@ -44,6 +45,7 @@ graph TD
         
         Hashers[4x Concurrent Hasher<br/>MD5 | SHA1 | SHA256 | SHA512]
         Yara[YARA-X & Keyword Scanner]
+        Plugins[Plugin Engine<br/>Native DLL/SO | Sandboxed Wasm]
         Writer[Image Writer & Compression Engine<br/>Raw | E01 | AFF | Sparse]
         
         VolEngine[Volatility 3 & Threat Intel Engine<br/>AbuseIPDB | VirusTotal]
@@ -62,10 +64,12 @@ graph TD
     Reader --> Broadcast
     Broadcast --> Hashers
     Broadcast --> Yara
+    Broadcast --> Plugins
     Broadcast --> Writer
 
     Hashers --> CaseDB
     Yara --> CaseDB
+    Plugins --> CaseDB
     Writer --> CaseDB
     VolEngine --> CaseDB
 
@@ -73,6 +77,16 @@ graph TD
     CaseDB <-->|Asynchronous IPC| UI
     VolEngine -->|Real-time Event Streams| UI
 ```
+
+### 🧩 Extensible Plugin Architecture
+OpenForensic operates as an extensible forensics platform rather than a static tool. Third-party modules integrate seamlessly into the acquisition pipeline through standardized lifecycle hooks defined in `OpenForensicPlugin`:
+* **`pre_acquisition`**: Called before imaging starts to inspect case metadata, volume geometry, and initialize resources.
+* **`on_block`**: Invoked for every data chunk read from disk. Chunks are dispatched across non-blocking multi-producer channels to background worker threads, guaranteeing zero degradation to disk reading throughput.
+* **`post_acquisition`**: Executed upon acquisition completion. Returns custom metrics, hashes, or analytical outputs that are embedded directly into official PDF, HTML, and text case reports.
+
+#### Dual-Loader Security & Execution
+* **Native Shared Libraries (`.so` / `.dll` / `.dylib`)**: High-performance compiled extensions loaded dynamically via FFI symbols (`_openforensic_plugin_create`) for OS-level operations.
+* **WebAssembly Modules (`.wasm`)**: Executed inside secure, memory-isolated sandboxes powered by `wasmtime`. Wasm plugins operate with zero host filesystem or network access unless explicitly granted, enabling safe execution of community detection rules and proprietary heuristics.
 
 ### 🛡️ Hardware & Software Write-Blocking
 OpenForensic enforces read-only access at the OS kernel boundary:

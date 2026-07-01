@@ -17,6 +17,7 @@ mod pdf_report;
 mod triage_db;
 pub mod timeline;
 mod ram_analysis;
+pub mod plugins;
 
 use platform::{ActiveBackend, DeviceBackend, DeviceInfo};
 use acquisition::{AcquisitionConfig, ProgressEvent};
@@ -266,6 +267,7 @@ async fn start_acquisition(
             read_verification: config_input.read_verification,
             keywords: config_input.keywords.clone(),
             yara_rules_path: config_input.yara_rules_path.clone(),
+            active_plugins: app_handle.state::<PluginManagerState>().lock().map(|m| m.get_active_plugins().into_iter().map(|(_, p)| p).collect()).unwrap_or_default(),
         };
 
         let source_path = config_input.source_path.clone();
@@ -343,6 +345,7 @@ async fn start_acquisition(
                         consistency_blocks_checked: None,
                         consistency_blocks_matched: None,
                         consistency_mismatches: Vec::new(),
+                        plugin_results: result.plugin_results.clone(),
                     };
                     let report_path = dest_file_path.join("logical_report.txt");
                     let _ = crate::report::generate_txt_report(report_path, &report_data);
@@ -524,6 +527,7 @@ async fn start_acquisition(
                         consistency_blocks_checked: None,
                         consistency_blocks_matched: None,
                         consistency_mismatches: Vec::new(),
+                        plugin_results: result.plugin_results.clone(),
                     };
                     let report_path = dest_file_path.with_extension("report.txt");
                     let _ = crate::report::generate_txt_report(&report_path, &report_data);
@@ -788,7 +792,9 @@ async fn start_live_acquisition(
         }
     });
 
+    let app_handle_live = app_handle.clone();
     tokio::spawn(async move {
+        let app_handle = app_handle_live;
         let tx = tx.clone();
         let dest_dir = PathBuf::from(&config_input.dest_path);
         let _ = std::fs::create_dir_all(&dest_dir);
@@ -939,6 +945,7 @@ async fn start_live_acquisition(
                             read_verification: false,
                             keywords: Vec::new(),
                             yara_rules_path: None,
+                            active_plugins: app_handle.state::<PluginManagerState>().lock().map(|m| m.get_active_plugins().into_iter().map(|(_, p)| p).collect()).unwrap_or_default(),
                         };
 
                         match crate::output::OutputWriter::new(
@@ -1075,6 +1082,7 @@ async fn start_live_acquisition(
             consistency_blocks_checked,
             consistency_blocks_matched,
             consistency_mismatches,
+            plugin_results: HashMap::new(),
         };
 
         let report_path = dest_dir.join("live_acquisition_report.txt");
@@ -1099,9 +1107,37 @@ async fn start_live_acquisition(
     Ok(())
 }
 
+pub type PluginManagerState = Mutex<crate::plugins::PluginManager>;
+
+#[tauri::command]
+async fn load_plugin(path: String, state: State<'_, PluginManagerState>) -> Result<crate::plugins::PluginInfo, String> {
+    let path = std::path::Path::new(&path);
+    let mut manager = state.lock().map_err(|_| "Plugin manager mutex poisoned".to_string())?;
+    manager.load_plugin_from_file(path)
+}
+
+#[tauri::command]
+async fn list_plugins(state: State<'_, PluginManagerState>) -> Result<Vec<crate::plugins::PluginInfo>, String> {
+    let manager = state.lock().map_err(|_| "Plugin manager mutex poisoned".to_string())?;
+    Ok(manager.list_plugins())
+}
+
+#[tauri::command]
+async fn unload_plugin(name: String, state: State<'_, PluginManagerState>) -> Result<(), String> {
+    let mut manager = state.lock().map_err(|_| "Plugin manager mutex poisoned".to_string())?;
+    manager.unload_plugin(&name)
+}
+
+#[tauri::command]
+async fn scan_plugins_directory(dir: String, state: State<'_, PluginManagerState>) -> Result<usize, String> {
+    let mut manager = state.lock().map_err(|_| "Plugin manager mutex poisoned".to_string())?;
+    Ok(manager.scan_directory(std::path::Path::new(&dir)))
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Mutex::new(None) as ActiveTaskState)
+        .manage(Mutex::new(crate::plugins::PluginManager::new()) as PluginManagerState)
         .invoke_handler(tauri::generate_handler![
             get_admin_status,
             scan_devices,
@@ -1119,7 +1155,11 @@ fn main() {
             browse_yara_folder,
             query_triage_db,
             generate_image_timeline,
-            crate::ram_analysis::start_volatility_analysis
+            crate::ram_analysis::start_volatility_analysis,
+            load_plugin,
+            list_plugins,
+            unload_plugin,
+            scan_plugins_directory
         ])
         .setup(|app| {
             let _ = crate::case_management::init_db(app.handle());

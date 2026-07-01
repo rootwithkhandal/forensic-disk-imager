@@ -19,6 +19,9 @@ pub enum ForgelensError {
 
     #[error("Acquisition cancelled")]
     Cancelled,
+
+    #[error("Plugin error: {0}")]
+    Plugin(String),
 }
 
 pub type Result<T> = std::result::Result<T, ForgelensError>;

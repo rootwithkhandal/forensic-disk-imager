@@ -101,6 +101,20 @@ pub fn generate_pdf_report(
         cursor_y -= 5.0;
     }
 
+    // Plugin Results
+    if !result.plugin_results.is_empty() {
+        write_text("Plugin Results & Custom Hashes", &font_bold, 14.0, margin_left, &mut cursor_y, 6.0);
+        let max_display = 20;
+        for (i, (key, val)) in result.plugin_results.iter().take(max_display).enumerate() {
+            if cursor_y < 20.0 { break; }
+            write_text(&format!("{}. {}: {}", i + 1, key, val), &font_regular, 9.0, margin_left + 5.0, &mut cursor_y, 4.0);
+        }
+        if result.plugin_results.len() > max_display {
+            write_text(&format!("... and {} more plugin results.", result.plugin_results.len() - max_display), &font_regular, 9.0, margin_left + 5.0, &mut cursor_y, 4.0);
+        }
+        cursor_y -= 5.0;
+    }
+
     // Signature Block (if near bottom, we just place it where it fits)
     if cursor_y < 40.0 {
         // Not enough room for signature, but simple layout doesn't do auto-pagination here.

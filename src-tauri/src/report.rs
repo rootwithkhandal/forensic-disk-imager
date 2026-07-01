@@ -33,6 +33,7 @@ pub struct ReportData {
     pub consistency_blocks_checked: Option<u64>,
     pub consistency_blocks_matched: Option<u64>,
     pub consistency_mismatches: Vec<u64>,
+    pub plugin_results: HashMap<String, String>,
 }
 
 fn to_ist_rfc2822(dt: &chrono::DateTime<chrono::Utc>) -> String {
@@ -196,6 +197,13 @@ pub fn generate_txt_report<P: AsRef<Path>>(path: P, data: &ReportData) -> Result
                     writeln!(file, "    Offset: 0x{:X}", offset)?;
                 }
             }
+        }
+    }
+
+    if !data.plugin_results.is_empty() {
+        writeln!(file, "\n--- Plugin Results & Custom Hashes ---")?;
+        for (k, v) in &data.plugin_results {
+            writeln!(file, "  {}: {}", k, v)?;
         }
     }
 

@@ -34,6 +34,7 @@ pub struct AcquisitionConfig {
     pub read_verification: bool,
     pub keywords: Vec<String>,
     pub yara_rules_path: Option<String>,
+    pub active_plugins: Vec<std::sync::Arc<std::sync::Mutex<Box<dyn crate::plugins::OpenForensicPlugin>>>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -45,6 +46,7 @@ pub enum ProgressEvent {
     Log(String),
     KeywordHit { keyword: String, offset: u64 },
     YaraHit { rule_name: String, offset: u64, tags: Vec<String> },
+    PluginLog { plugin_name: String, message: String },
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +56,7 @@ pub struct AcquisitionResult {
     pub hashes: HashMap<HashAlgorithm, String>,
     pub keyword_hits: Vec<(String, u64)>,
     pub yara_hits: Vec<(String, Vec<String>, u64)>,
+    pub plugin_results: HashMap<String, String>,
 }
 
 
@@ -132,6 +135,63 @@ pub async fn acquire(
                 let _ = progress_tx.blocking_send(ProgressEvent::Log(format!("[YARA WARNING] Failed to load rules: {}", e)));
             }
         }
+    }
+
+    let active_plugins = config.active_plugins.clone();
+    let plugin_ctx = crate::plugins::PluginContext {
+        case_number: config.case_number.clone(),
+        examiner: config.examiner.clone(),
+        evidence_id: config.evidence_id.clone(),
+        notes: config.notes.clone(),
+        total_size: source.size,
+        block_size: config.block_size,
+        imaging_mode: config.imaging_mode.clone(),
+        format: config.format.clone(),
+    };
+    for plugin_arc in &active_plugins {
+        let (plugin_name, res) = {
+            if let Ok(mut p) = plugin_arc.lock() {
+                (p.name().to_string(), p.pre_acquisition(&plugin_ctx))
+            } else {
+                continue;
+            }
+        };
+        match res {
+            Err(e) => {
+                let _ = progress_tx.send(ProgressEvent::PluginLog {
+                    plugin_name,
+                    message: format!("[PRE-ACQUISITION ERROR] {}", e),
+                }).await;
+            }
+            Ok(_) => {
+                let _ = progress_tx.send(ProgressEvent::PluginLog {
+                    plugin_name,
+                    message: "[PRE-ACQUISITION] Initialized successfully".to_string(),
+                }).await;
+            }
+        }
+    }
+    let mut plugin_tx_opt = None;
+    let mut plugin_task = None;
+    if !active_plugins.is_empty() {
+        let (p_tx, mut p_rx) = tokio::sync::mpsc::channel::<(u64, std::sync::Arc<Vec<u8>>)>(4);
+        plugin_tx_opt = Some(p_tx);
+        let plugins_worker = active_plugins.clone();
+        let plugin_progress_tx = progress_tx.clone();
+        plugin_task = Some(tokio::task::spawn_blocking(move || {
+            while let Some((offset, chunk)) = p_rx.blocking_recv() {
+                for plugin_arc in &plugins_worker {
+                    if let Ok(mut p) = plugin_arc.lock() {
+                        if let Err(e) = p.on_block(offset, &chunk) {
+                            let _ = plugin_progress_tx.blocking_send(ProgressEvent::PluginLog {
+                                plugin_name: p.name().to_string(),
+                                message: format!("[ON-BLOCK ERROR at offset {}] {}", offset, e),
+                            });
+                        }
+                    }
+                }
+            }
+        }));
     }
 
     let read_verification = config.read_verification;
@@ -298,6 +358,11 @@ pub async fn acquire(
                     return Err(crate::error::ForgelensError::Backend("YARA scanning task died unexpectedly".to_string()));
                 }
             }
+            if let Some(ref p_tx) = plugin_tx_opt {
+                if let Err(_) = p_tx.send((bytes_read, chunk.clone())).await {
+                    return Err(crate::error::ForgelensError::Backend("Plugin execution task died unexpectedly".to_string()));
+                }
+            }
 
             if let Err(_) = hash_tx.send(chunk.clone()).await {
                 return Err(crate::error::ForgelensError::Backend("Hashing task died unexpectedly".to_string()));
@@ -338,6 +403,7 @@ pub async fn acquire(
     drop(write_tx); // close the channel to signal the writing task to finish
     drop(kw_tx); // close the keyword task channel
     drop(yara_tx_opt); // close YARA task channel
+    drop(plugin_tx_opt); // close plugin task channel
 
     let final_hashes = hashing_task.await.map_err(|e| {
         crate::error::ForgelensError::Backend(format!("Hashing task panic: {}", e))
@@ -353,6 +419,43 @@ pub async fn acquire(
     } else {
         Vec::new()
     };
+    if let Some(t) = plugin_task {
+        let _ = t.await;
+    }
+
+    let summary = crate::plugins::AcquisitionSummary {
+        bytes_read,
+        bad_sectors,
+        elapsed_secs: start_time.elapsed().as_secs_f64(),
+    };
+
+    let mut final_plugin_results = HashMap::new();
+    for plugin_arc in &active_plugins {
+        let (plugin_name, res) = {
+            if let Ok(mut p) = plugin_arc.lock() {
+                (p.name().to_string(), p.post_acquisition(&summary))
+            } else {
+                continue;
+            }
+        };
+        match res {
+            Ok(output) => {
+                for (k, v) in output.results {
+                    final_plugin_results.insert(format!("{}.{}", plugin_name, k), v);
+                }
+                let _ = progress_tx.send(ProgressEvent::PluginLog {
+                    plugin_name,
+                    message: "[POST-ACQUISITION] Completed successfully".to_string(),
+                }).await;
+            }
+            Err(e) => {
+                let _ = progress_tx.send(ProgressEvent::PluginLog {
+                    plugin_name,
+                    message: format!("[POST-ACQUISITION ERROR] {}", e),
+                }).await;
+            }
+        }
+    }
 
     let result = AcquisitionResult {
         bytes_read,
@@ -360,6 +463,7 @@ pub async fn acquire(
         hashes: final_hashes,
         keyword_hits: final_kw_hits,
         yara_hits: final_yara_hits,
+        plugin_results: final_plugin_results,
     };
 
     if !bad_sector_map.sectors.is_empty() {
@@ -593,6 +697,7 @@ pub async fn acquire_logical(
         hashes: global_hashes,
         keyword_hits: Vec::new(),
         yara_hits: Vec::new(),
+        plugin_results: HashMap::new(),
     };
     
     Ok(result)
